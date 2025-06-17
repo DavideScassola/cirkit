@@ -341,7 +341,7 @@ class RegionGraph(DiAcyclicGraph[RegionGraphNode]):
     def build_circuit(
         self,
         *,
-        input_factory: InputLayerFactory,
+        input_factory: InputLayerFactory | list[InputLayerFactory],
         sum_product: str | None = None,
         sum_weight_factory: ParameterFactory | None = None,
         nary_sum_weight_factory: ParameterFactory | None = None,
@@ -515,16 +515,17 @@ class RegionGraph(DiAcyclicGraph[RegionGraphNode]):
             region_inputs = self.region_inputs(node)
             region_outputs = self.region_outputs(node)
             if not region_inputs:
+                node_input_factory = input_factory[next(iter(node.scope))] if isinstance(input_factory, list) else input_factory
                 # Input region node
                 if factorize_multivariate and len(node.scope) > 1:
                     factorized_input_sls = [
-                        input_factory(Scope([sc]), num_input_units) for sc in node.scope
+                        node_input_factory(Scope([sc]), num_input_units) for sc in node.scope
                     ]
                     input_sl = HadamardLayer(num_input_units, arity=len(factorized_input_sls))
                     layers.extend(factorized_input_sls)
                     in_layers[input_sl] = factorized_input_sls
                 else:
-                    input_sl = input_factory(node.scope, num_input_units)
+                    input_sl = node_input_factory(node.scope, num_input_units)
                 num_units = num_sum_units if self.region_outputs(node) else num_classes
                 if sum_factory is None:
                     layers.append(input_sl)
