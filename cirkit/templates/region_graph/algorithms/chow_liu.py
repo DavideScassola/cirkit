@@ -169,12 +169,14 @@ def _heterogeneous_mutual_info(data: Tensor, is_categorical_mask: list) -> Tenso
     mi_matrix = torch.zeros((data.shape[1], data.shape[1]), dtype=torch.float32, device=data.device)
     
     # Compute mutual information for continuous variables as they were a Multivariate Gaussian
-    mi_matrix[continuous_subset.unsqueeze(1), continuous_subset] = -0.5 * torch.log(1 - torch.corrcoef(data[:, continuous_subset].t()).fill_diagonal_(0) ** 2)
+    if len(continuous_subset) > 1:
+        mi_matrix[continuous_subset.unsqueeze(1), continuous_subset] = -0.5 * torch.log(1 - torch.corrcoef(data[:, continuous_subset].t()).fill_diagonal_(0) ** 2)
     
     # Compute mutual information for discrete variables
-    mi_matrix[discrete_subset.unsqueeze(1), discrete_subset] = _categorical_mutual_info(
-        data=data[:, discrete_subset].long(), num_categories=None, chunk_size=None
-    )
+    if len(discrete_subset) > 1:
+        mi_matrix[discrete_subset.unsqueeze(1), discrete_subset] = _categorical_mutual_info(
+            data=data[:, discrete_subset].long(), num_categories=None, chunk_size=None
+        )
     
     def gaussian_entropy(x: Tensor) -> Tensor:
         return 0.5 * (torch.log(2 * torch.pi * torch.var(x, unbiased=False) + GAUSSIAN_ENTROPY_EPSILON) + 1)
