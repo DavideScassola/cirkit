@@ -661,6 +661,144 @@ class TorchGaussianLayer(TorchExpFamilyLayer):
         samples = samples.permute(1, 2, 0)  # (F, K, N)
         return samples
 
+class TorchDiscretizedGaussianLayer(TorchExpFamilyLayer):
+    """The Discretizecd Gaussian distribution layer. Optionally, this layer can encode unnormalized Discretizecd Gaussian
+    distributions with the spefication of a log-partition function parameter."""
+
+    def __init__(
+        self,
+        scope_idx: Tensor,
+        num_output_units: int,
+        *,
+        marginal_mean: float,
+        marginal_stddev: float,
+        mean: TorchParameter,
+        stddev: TorchParameter,
+        log_partition: TorchParameter | None = None,
+        semiring: Semiring | None = None,
+    ) -> None:
+        r"""Initialize a Discretizecd Gaussian layer.
+
+        Args:
+            marginal_mean: The mean of the fitted data, which is used to rescale the input.
+            marginal_stddev: The standard deviation of the fitted data, which is used to rescale the input.
+            scope_idx: A tensor of shape $(F, D)$, where $F$ is the number of folds, and
+                $D$ is the number of variables on which the input layers in each fold are defined on.
+                Alternatively, a tensor of shape $(D,)$ can be specified, which will be interpreted
+                as a tensor of shape $(1, D)$, i.e., with $F = 1$.
+            num_output_units: The number of output units.
+            mean: The mean parameter, having shape $(F, K)$, where $K$ is the number of
+                output units.
+            stddev: The standard deviation parameter, having shape $(F, K$, where $K$ is the
+                number of output units.
+            log_partition: An optional parameter of shape $(F, K$, encoding the log-partition.
+                function. If this is not None, then the Discretizecd Gaussian layer encodes unnormalized
+                Discretizecd Gaussian likelihoods, which are then normalized with the given log-partition
+                function.
+            semiring: The evaluation semiring.
+                Defaults to [SumProductSemiring][cirkit.backend.torch.semiring.SumProductSemiring].
+
+        Raises:
+            ValueError: If the scope contains more than one variable.
+            ValueError: If the mean and standard deviation parameter shapes are incorrect.
+            ValueError: If the log-partition function parameter shape is incorrect.
+        """
+        num_variables = scope_idx.shape[-1]
+        if num_variables != 1:
+            raise ValueError("The Gaussian layer encodes a univariate distribution")
+        super().__init__(
+            scope_idx,
+            num_output_units,
+            semiring=semiring,
+        )
+        if not self._valid_mean_stddev_shape(mean):
+            raise ValueError(
+                f"Expected number of folds {self.num_folds} "
+                f"and shape {self._mean_stddev_shape} for 'mean', found"
+                f"{mean.num_folds} and {mean.shape}, respectively"
+            )
+        if not self._valid_mean_stddev_shape(stddev):
+            raise ValueError(
+                f"Expected number of folds {self.num_folds} "
+                f"and shape {self._mean_stddev_shape} for 'stddev', found"
+                f"{stddev.num_folds} and {stddev.shape}, respectively"
+            )
+        if log_partition is not None and not self._valid_log_partition_shape(log_partition):
+            raise ValueError(
+                f"Expected number of folds {self.num_folds} "
+                f"and shape {self._log_partition_shape} for 'log_partition', found"
+                f"{log_partition.num_folds} and {log_partition.shape}, respectively"
+            )
+        self.mean = mean
+        self.stddev = stddev
+        self.log_partition = log_partition
+        self.marginal_mean = marginal_mean
+        self.marginal_stddev = marginal_stddev
+
+    def _valid_mean_stddev_shape(self, p: TorchParameter) -> bool:
+        if p.num_folds != self.num_folds:
+            return False
+        return p.shape == self._mean_stddev_shape
+
+    def _valid_log_partition_shape(self, log_partition: TorchParameter) -> bool:
+        if log_partition.num_folds != self.num_folds:
+            return False
+        return log_partition.shape == self._log_partition_shape
+
+    @property
+    def _mean_stddev_shape(self) -> tuple[int, ...]:
+        return (self.num_output_units,)
+
+    @property
+    def _log_partition_shape(self) -> tuple[int, ...]:
+        return (self.num_output_units,)
+
+    @property
+    def config(self) -> Mapping[str, Any]:
+        return {"num_output_units": self.num_output_units,
+                "marginal_mean": self.marginal_mean,
+                "marginal_stddev": self.marginal_stddev}
+
+    @property
+    def params(self) -> Mapping[str, TorchParameter]:
+        params = {"mean": self.mean, "stddev": self.stddev}
+        if self.log_partition is not None:
+            params["log_partition"] = self.log_partition
+        return params
+
+    def log_unnormalized_likelihood(self, x: Tensor) -> Tensor:
+        mean = self.mean().unsqueeze(dim=1)  # (F, 1, K)
+        stddev = self.stddev().unsqueeze(dim=1)  # (F, 1, K)
+        n_dist = distributions.Normal(loc=mean, scale=stddev)
+        
+        x_rounded = x.round()  # Round x to the nearest integer        
+        def rescale(i):
+            return (i - self.marginal_mean) / self.marginal_stddev
+        
+        # TODO: This is problematic from the numerical point of view, if the data point is too far, then there is no signal
+        x = torch.log(n_dist.cdf(rescale(x_rounded + 0.5)) - n_dist.cdf(rescale(x_rounded - 0.5)) + 1e-10)  # (F, B, K)
+        # x = n_dist.log_prob(rescale(x.round()))  # stable but un-normalized pdf
+        # x = n_dist.log_prob(x_rescaled)  # Original
+        if self.log_partition is not None:
+            log_partition = self.log_partition()  # (F, K)
+            x = x + log_partition.unsqueeze(dim=1)
+        return x
+
+    def log_partition_function(self) -> Tensor:
+        if self.log_partition is None:
+            return torch.zeros(
+                size=(self.num_folds, 1, self.num_output_units), device=self.mean.device
+            )
+        log_partition = self.log_partition()  # (F, K)
+        return log_partition.unsqueeze(dim=1)  # (F, 1, K)
+
+    def sample(self, num_samples: int = 1) -> Tensor:
+        dist = distributions.Normal(loc=self.mean(), scale=self.stddev())
+        samples = dist.sample((num_samples,))  # (N, F, K)
+        samples = ((samples * self.marginal_stddev) + self.marginal_mean).round()
+        samples = samples.permute(1, 2, 0)  # (F, K, N)
+        return samples
+
 
 class TorchConstantValueLayer(TorchConstantLayer):
     """An input layer having empty scope and computing a constant value."""

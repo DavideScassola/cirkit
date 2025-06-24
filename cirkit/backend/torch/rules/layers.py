@@ -11,6 +11,7 @@ from cirkit.backend.torch.layers.input import (
     TorchEmbeddingLayer,
     TorchEvidenceLayer,
     TorchGaussianLayer,
+    TorchDiscretizedGaussianLayer,
     TorchInputLayer,
     TorchPolynomialLayer,
 )
@@ -21,6 +22,7 @@ from cirkit.symbolic.layers import (
     EmbeddingLayer,
     EvidenceLayer,
     GaussianLayer,
+    DiscretizedGaussianLayer,
     HadamardLayer,
     KroneckerLayer,
     PolynomialLayer,
@@ -95,6 +97,25 @@ def compile_gaussian_layer(compiler: "TorchCompiler", sl: GaussianLayer) -> Torc
     )
 
 
+def compile_discretized_gaussian_layer(compiler: "TorchCompiler", sl: DiscretizedGaussianLayer) -> TorchDiscretizedGaussianLayer:
+    mean = compiler.compile_parameter(sl.mean)
+    stddev = compiler.compile_parameter(sl.stddev)
+    if sl.log_partition is not None:
+        log_partition = compiler.compile_parameter(sl.log_partition)
+    else:
+        log_partition = None
+    return TorchDiscretizedGaussianLayer(
+        torch.tensor(tuple(sl.scope)),
+        sl.num_output_units,
+        mean=mean,
+        stddev=stddev,
+        log_partition=log_partition,
+        semiring=compiler.semiring,
+        marginal_mean=sl.marginal_mean,
+        marginal_stddev=sl.marginal_stddev,
+    )
+
+
 def compile_polynomial_layer(
     compiler: "TorchCompiler", sl: PolynomialLayer
 ) -> TorchPolynomialLayer:
@@ -152,6 +173,7 @@ DEFAULT_LAYER_COMPILATION_RULES: dict[LayerCompilationSign, LayerCompilationFunc
     CategoricalLayer: compile_categorical_layer,
     BinomialLayer: compile_binomial_layer,
     GaussianLayer: compile_gaussian_layer,
+    DiscretizedGaussianLayer: compile_discretized_gaussian_layer,
     PolynomialLayer: compile_polynomial_layer,
     HadamardLayer: compile_hadamard_layer,
     KroneckerLayer: compile_kronecker_layer,

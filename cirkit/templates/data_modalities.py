@@ -77,7 +77,7 @@ def image_data(
         "poon-domingos",
     ]:
         raise ValueError(f"Unknown region graph called {region_graph}")
-    if input_layer not in ["categorical", "binomial", "embedding", "gaussian"]:
+    if input_layer not in ["categorical", "binomial", "embedding", "gaussian", "discretized_gaussian"]:
         raise ValueError(f"Unknown input layer called {input_layer}")
 
     # Construct the image-tailored region graph
@@ -106,6 +106,8 @@ def image_data(
         case "embedding":
             input_kwargs = {"num_states": 256}
         case "gaussian":
+            input_kwargs = {}
+        case "discretized_gaussian":
             input_kwargs = {}
         case _:
             assert False

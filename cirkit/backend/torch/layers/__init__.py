@@ -7,6 +7,7 @@ from .input import TorchCategoricalLayer as TorchCategoricalLayer
 from .input import TorchConstantValueLayer as TorchLogPartitionLayer
 from .input import TorchExpFamilyLayer as TorchExpFamilyLayer
 from .input import TorchGaussianLayer as TorchGaussianLayer
+from .input import TorchGaussianLayer as TorchDiscretizedGaussianLayer
 from .input import TorchInputLayer as TorchInputLayer
 from .input import TorchPolynomialLayer as TorchPolynomialLayer
 from .optimized import TorchCPTLayer as TorchCPTLayer

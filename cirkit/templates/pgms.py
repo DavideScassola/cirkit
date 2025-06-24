@@ -35,7 +35,7 @@ def fully_factorized(
     """
     if num_variables <= 0:
         raise ValueError("The number of variables should be a positive integer")
-    if input_layer not in ["categorical", "binomial", "gaussian"]:
+    if input_layer not in ["categorical", "binomial", "gaussian", "discretized_gaussian"]:
         raise ValueError(f"Unknown input layer called {input_layer}")
     if input_layer_kwargs is None:
         input_layer_kwargs = [{}] * num_variables
@@ -113,7 +113,7 @@ def hmm(
     num_variables = len(ordering)
     if set(ordering) != set(range(num_variables)):
         raise ValueError("The 'ordering' of variables is not valid")
-    if input_layer not in ["categorical", "binomial", "gaussian"]:
+    if input_layer not in ["categorical", "binomial", "gaussian", "discretized_gaussian"]:
         raise ValueError(f"Unknown input layer called {input_layer}")
     if input_layer_kwargs is None:
         input_layer_kwargs = [{}] * num_variables
