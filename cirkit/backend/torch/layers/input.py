@@ -765,6 +765,12 @@ class TorchDiscretizedGaussianLayer(TorchExpFamilyLayer):
         if self.log_partition is not None:
             params["log_partition"] = self.log_partition
         return params
+    
+    def log_cdf(self, x: Tensor, loc: Tensor, std: Tensor) -> Tensor:
+        raise NotImplementedError
+    
+    def log_sub_exp(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+        return a + torch.log1p(-torch.exp(b - a))
 
     def log_unnormalized_likelihood(self, x: Tensor) -> Tensor:
         mean = self.mean().unsqueeze(dim=1)  # (F, 1, K)
@@ -776,9 +782,22 @@ class TorchDiscretizedGaussianLayer(TorchExpFamilyLayer):
             return (i - self.marginal_mean) / self.marginal_stddev
         
         # TODO: This is problematic from the numerical point of view, if the data point is too far, then there is no signal
-        x = torch.log(n_dist.cdf(rescale(x_rounded + 0.5)) - n_dist.cdf(rescale(x_rounded - 0.5)) + 1e-10)  # (F, B, K)
-        # x = n_dist.log_prob(rescale(x.round()))  # stable but un-normalized pdf
-        # x = n_dist.log_prob(x_rescaled)  # Original
+        
+        
+        prob = n_dist.cdf(rescale(x_rounded + 0.5)) - n_dist.cdf(rescale(x_rounded - 0.5))  # (F, B, K)
+        mask = prob > 0
+        x = n_dist.log_prob(rescale(x_rounded)) # rough approximation for points that are far
+        x[mask] = torch.log(prob[mask])
+          
+        # BINNING BUT NOT STABLE
+        # x = torch.log(n_dist.cdf(rescale(x_rounded + 0.5)) - n_dist.cdf(rescale(x_rounded - 0.5)) + 1e-10)  # (F, B, K)
+        
+        # STABLE BUT UN-NORMALIZED PDF
+        # x = n_dist.log_prob(rescale(x.round()))
+        
+        # ORIGINAL
+        # x = n_dist.log_prob(rescale(x))  # Original
+        
         if self.log_partition is not None:
             log_partition = self.log_partition()  # (F, K)
             x = x + log_partition.unsqueeze(dim=1)
