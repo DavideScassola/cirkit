@@ -661,7 +661,7 @@ class TorchGaussianLayer(TorchExpFamilyLayer):
         samples = samples.permute(1, 2, 0)  # (F, K, N)
         return samples
 
-class TorchDiscretizedGaussianLayer(TorchExpFamilyLayer):
+class TorchDiscretizedLogisticLayer(TorchExpFamilyLayer):
     """The Discretizecd Gaussian distribution layer. Optionally, this layer can encode unnormalized Discretizecd Gaussian
     distributions with the spefication of a log-partition function parameter."""
 
@@ -766,43 +766,34 @@ class TorchDiscretizedGaussianLayer(TorchExpFamilyLayer):
             params["log_partition"] = self.log_partition
         return params
     
-    def log_cdf(self, x: Tensor, loc: Tensor, std: Tensor) -> Tensor:
-        raise NotImplementedError
+    def discrete_logistic_ll(self, x: Tensor, loc: Tensor, scale: Tensor, bin_size = 1.0) -> Tensor:
+        precision = 1 / scale
+        a = (x - bin_size/2 - loc) * precision
+        return -a + torch.log(1 - torch.exp(-bin_size*precision)) + torch.nn.functional.logsigmoid(( x + bin_size/2 - loc)* precision ) + torch.nn.functional.logsigmoid(a)
+        
+    def rescale(self, x: Tensor) -> Tensor:
+        """Rescale the input x using the marginal mean and standard deviation."""
+        return (x - self.marginal_mean) / self.marginal_stddev
     
-    def log_sub_exp(self, a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-        return a + torch.log1p(-torch.exp(b - a))
-
+    def logistic_distribution_scale(self) -> Tensor:
+        """Compute the scale of the logistic distribution."""
+        # The scale is the standard deviation of the logistic distribution for s=1
+        # which is sqrt(pi^2 / 3)
+        return (torch.pi**2 / 3)**0.5
+        
     def log_unnormalized_likelihood(self, x: Tensor) -> Tensor:
-        mean = self.mean().unsqueeze(dim=1)  # (F, 1, K)
-        stddev = self.stddev().unsqueeze(dim=1)  # (F, 1, K)
-        n_dist = distributions.Normal(loc=mean, scale=stddev)
+        mean = self.mean().unsqueeze(dim=1) # (F, 1, K)
+        stddev = self.stddev().unsqueeze(dim=1) # (F, 1, K)
         
-        x_rounded = x.round()  # Round x to the nearest integer        
-        def rescale(i):
-            return (i - self.marginal_mean) / self.marginal_stddev
-        
-        # TODO: This is problematic from the numerical point of view, if the data point is too far, then there is no signal
-        
-        
-        prob = n_dist.cdf(rescale(x_rounded + 0.5)) - n_dist.cdf(rescale(x_rounded - 0.5))  # (F, B, K)
-        mask = prob > 0
-        x = n_dist.log_prob(rescale(x_rounded)) # rough approximation for points that are far
-        x[mask] = torch.log(prob[mask])
-          
-        # BINNING BUT NOT STABLE
-        # x = torch.log(n_dist.cdf(rescale(x_rounded + 0.5)) - n_dist.cdf(rescale(x_rounded - 0.5)) + 1e-10)  # (F, B, K)
-        
-        # STABLE BUT UN-NORMALIZED PDF
-        # x = n_dist.log_prob(rescale(x.round()))
-        
-        # ORIGINAL
-        # x = n_dist.log_prob(rescale(x))  # Original
-        
+        x_rounded = x.round()  # Round the input to the nearest integer
+        x_out = self.discrete_logistic_ll(self.rescale(x_rounded), mean, stddev, bin_size=1/self.marginal_stddev)  # (F, B, K)
+        #x_check = torch.log(torch.nn.functional.sigmoid((self.rescale(x_rounded + 0.5) - mean)/stddev) - torch.nn.functional.sigmoid((self.rescale(x_rounded  - 0.5) - mean)/stddev))
+
         if self.log_partition is not None:
             log_partition = self.log_partition()  # (F, K)
-            x = x + log_partition.unsqueeze(dim=1)
-        return x
-
+            x_out = x_out + log_partition.unsqueeze(dim=1)
+        return x_out
+    
     def log_partition_function(self) -> Tensor:
         if self.log_partition is None:
             return torch.zeros(
@@ -810,10 +801,18 @@ class TorchDiscretizedGaussianLayer(TorchExpFamilyLayer):
             )
         log_partition = self.log_partition()  # (F, K)
         return log_partition.unsqueeze(dim=1)  # (F, 1, K)
-
+    
     def sample(self, num_samples: int = 1) -> Tensor:
-        dist = distributions.Normal(loc=self.mean(), scale=self.stddev())
-        samples = dist.sample((num_samples,))  # (N, F, K)
+        """Sample from the Discretized Gaussian distribution."""
+        # k = (np.pi**2 / 3) **0.5 
+        def quantile_function(p: Tensor, loc: Tensor, scale: Tensor) -> Tensor:
+            """Compute the quantile function for the logistic distribution."""
+            return loc + scale * torch.log(p / (1 - p))
+        
+        samples = quantile_function(torch.rand(size=(num_samples, *self.mean().shape), device=self.mean().device),
+                                    self.mean(),
+                                    self.stddev()).detach() 
+        
         samples = ((samples * self.marginal_stddev) + self.marginal_mean).round()
         samples = samples.permute(1, 2, 0)  # (F, K, N)
         return samples

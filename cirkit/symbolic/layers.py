@@ -525,7 +525,7 @@ class GaussianLayer(InputLayer):
         return params
 
 
-class DiscretizedGaussianLayer(InputLayer):
+class DiscretizedLogisticLayer(InputLayer):
     """A symbolic Discretized Gaussian layer, which is parameterized by mean and standard deviations.
     Optionally, it can represent an unnormalized Discretized Gaussian layer by specifying the log partition
     function."""
