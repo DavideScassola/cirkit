@@ -766,10 +766,22 @@ class TorchDiscretizedLogisticLayer(TorchExpFamilyLayer):
             params["log_partition"] = self.log_partition
         return params
     
+    def log1mexp(self, x: Tensor) -> Tensor:
+        # Source: https://github.com/wouterkool/estimating-gradients-without-replacement/blob/9d8bf8b/bernoulli/gumbel.py#L7-L11
+        # Computes log(1-exp(-|x|))
+        # See https://cran.r-project.org/web/packages/Rmpfr/vignettes/log1mexp-note.pdf
+        x = -x.abs()
+        x = torch.where(
+            x > -0.6931471805599453094,
+            torch.log(-torch.expm1(x)),
+            torch.log1p(-torch.exp(x)),
+        )
+        return x
+    
     def discrete_logistic_ll(self, x: Tensor, loc: Tensor, scale: Tensor, bin_size = 1.0) -> Tensor:
         precision = 1 / scale
         a = (x - bin_size/2 - loc) * precision
-        return -a + torch.log(1 - torch.exp(-bin_size*precision)) + torch.nn.functional.logsigmoid(( x + bin_size/2 - loc)* precision ) + torch.nn.functional.logsigmoid(a)
+        return -a + self.log1mexp(bin_size*precision) + torch.nn.functional.logsigmoid(( x + bin_size/2 - loc)* precision ) + torch.nn.functional.logsigmoid(a)
         
     def rescale(self, x: Tensor) -> Tensor:
         """Rescale the input x using the marginal mean and standard deviation."""
