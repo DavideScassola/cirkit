@@ -10,7 +10,7 @@ from cirkit.templates.region_graph.graph import RegionGraph
 # pylint: disable-next=invalid-name
 def ChowLiuTree(
     data: Tensor,
-    input_type: str | list,
+    input_type: str | list[dict],
     root: int | None = None,
     chunk_size: int | None = None,
     num_categories: int | None = None,
@@ -25,7 +25,8 @@ def ChowLiuTree(
     Args:
         data (Tensor): The input data over which running the CLT algorithm,
             it must be in tabular form (i.e. a matrix).
-        input_type (str): The type of the input data, e.g. 'categorical', 'gaussian'.
+        input_type (str | list): The type of the input data, e.g. 'categorical', 'gaussian'.
+            If a list is provided, then each feature is treated differently according to its type.
         root (int | None): The index of the variable desired as root.
         chunk_size (int | None): Chunked computation, useful in case of large input data.
         num_categories (int | None): Specifies the number of categories in case of
@@ -46,7 +47,8 @@ def ChowLiuTree(
     assert data.ndim == 2
     assert root is None or -1 < root < data.size(-1)
     if isinstance(input_type, list):
-        mutual_info = _heterogeneous_mutual_info(data, is_categorical_mask=[input_layers['name'] == "categorical" for input_layers in input_type])
+        is_categorical_mask = [name == "categorical" for name in input_type]
+        mutual_info = _heterogeneous_mutual_info(data, is_categorical_mask=is_categorical_mask)
     elif input_type == "categorical":
         if num_bins is not None:
             if num_categories is None:
@@ -143,25 +145,27 @@ def _categorical_mutual_info(
     return (joints * (joints.log() - outers.log())).sum(dim=(2, 3)).fill_diagonal_(0)
 
 
-def _heterogeneous_mutual_info(data: Tensor, is_categorical_mask: list) -> Tensor:
+def _heterogeneous_mutual_info(data: Tensor, is_categorical_mask: list[bool]) -> Tensor:
     """Computes the mutual information matrix for heterogeneous data (both discrete/categorical data and countinuous).
     The mutual information among continuous variables is computed as if they were a Multivariate Gaussian.
     The mutual information among discrete variables is computed using the categorical mutual information defined above.
     The mutual information between a continuous variable C and discrete variable D is computed using the formula:
         I(C, D) = H(C) - H(C | D)
-    assuming gaussian distributions p(C|D) for continuous variables when conditioned on discrete variables. 
+    assuming gaussian distributions p(C|D) for continuous variables when conditioned on discrete variables
+    and gaussian marginals p(c). 
 
     Args:
         data (Tensor): The input data over which computing the MI matrix,
             it must be in tabular form (i.e. a matrix).
-        is_categorical_mask (list): A list of booleans indicating whether each column in the data is categorical (True) or continuous (False).
+        is_categorical_mask (list[bool]): A boolean mask of the same length as the number of columns in `data`, indicating if the column has to be considered categorical.
+        A list of strings indicating the type of each variable whether each column in the data is categorical (True) or continuous (False).
 
     Returns:
         The mutual information matrix (main diagonal is 0).
     """
     
     GAUSSIAN_ENTROPY_EPSILON = 1e-4
-    
+        
     is_categorical = torch.tensor(is_categorical_mask, dtype=torch.bool, device=data.device)
     continuous_subset = torch.where(~is_categorical)[0]
     discrete_subset = torch.where(is_categorical)[0]
@@ -192,7 +196,7 @@ def _heterogeneous_mutual_info(data: Tensor, is_categorical_mask: list) -> Tenso
         # H(C)
         entropy = gaussian_entropy(data[:, c_index])
         for d_index in discrete_subset.tolist():                   
-            # H(C | D) = sum_D{ -H[p(C|D)]p(D) }
+            # H(C | D) = sum_D{ integral_C{ p(C|D)p(D) log_p(C|D) } } = sum_D{ -H[p(C|D)]p(D) }
             
             # Computing H[p(C|D)] for each category of D
             h_C_given_D = torch.stack(
@@ -202,6 +206,6 @@ def _heterogeneous_mutual_info(data: Tensor, is_categorical_mask: list) -> Tenso
             
             # I(C, D) = H(C) - H(C | D) = H(C) - sum_D{ H[p(C|D)]p(D) }
             mi_matrix[c_index, d_index] = entropy - torch.sum(h_C_given_D * p_D[d_index])
-            mi_matrix[d_index, c_index] = mi_matrix[c_index, d_index]
+            mi_matrix[d_index, c_index] = mi_matrix[c_index, d_index] # mutual information is symmetric
             
-    return mi_matrix.fill_diagonal_(0)  # Fill the diagonal with zeros (shouldn't be needed)    
+    return mi_matrix.fill_diagonal_(0)  # Fill the diagonal with zeros

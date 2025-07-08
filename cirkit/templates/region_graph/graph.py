@@ -361,7 +361,9 @@ class RegionGraph(DiAcyclicGraph[RegionGraphNode]):
             The factory that constructs the input factory must always be specified.
 
         Args:
-            input_factory: A factory that builds an input layer.
+            input_factory: A factory that builds an input layer. If a list is given, then a 
+                different input layer is built for each feature. In this case the length should be
+                the same as the number of input variables in the region graph.
             sum_product: The sum-product layer to use. It can be None, 'cp', 'cp-t', or 'tucker'.
             sum_weight_factory: The factory to construct the weights of the sum layers.
                 It can be None, or a parameter factory, i.e., a map

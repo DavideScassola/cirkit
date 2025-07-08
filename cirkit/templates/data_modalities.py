@@ -1,5 +1,5 @@
 import functools
-from typing import Any, List
+from typing import Any
 
 import numpy as np
 
@@ -150,7 +150,7 @@ def tabular_data(
     *,
     num_features: int | None = None,
     data: Tensor | None = None,
-    input_layers: dict | List[dict],
+    input_layers: dict | list[dict],
     num_input_units: int,
     sum_product_layer: str,
     num_sum_units: int,
@@ -227,7 +227,7 @@ def tabular_data(
                 raise ValueError(f"You must pass `data=` if you ask for `chow-liu-tree`.")           
             rg = ChowLiuTree(
                 data=data,
-                input_type=input_layers["name"] if isinstance(input_layers, dict) else input_layers,
+                input_type=input_layers["name"] if isinstance(input_layers, dict) else [input_layers['name'] for input_layers in input_layers],
                 num_categories=input_layers["args"]["num_categories"] if isinstance(input_layers, dict) and input_layers["name"] == "categorical" else None,
                 as_region_graph=True,
             )
