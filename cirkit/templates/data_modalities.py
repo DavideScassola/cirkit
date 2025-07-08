@@ -150,8 +150,7 @@ def tabular_data(
     *,
     num_features: int | None = None,
     data: Tensor | None = None,
-    kwargs: int,
-    input_layers: str | List[dict[str, Any]],
+    input_layers: dict | List[dict],
     num_input_units: int,
     sum_product_layer: str,
     num_sum_units: int,
@@ -174,17 +173,16 @@ def tabular_data(
         data (Tensor, optional):
             A Torch tensor of shape `(n_samples, n_features)`.
             **Required** if `region_graph="chow-liu-tree"`, since the tree structure is learned from these samples.
-        kwargs (int):
-            A single integer that serves dual purposes depending on context:
-            - When `region_graph="chow-liu-tree"`, this is `num_categories` for the discrete Chow–Liu MI estimator.
-            - When `region_graph="random-binary-tree"`, it still feeds into the input layer below.
-            - In the input layer (see `input_layer`), it is interpreted as:
-              - `num_categories` for `"categorical"`,
-              - _unused_ for `"gaussian"`.
-        input_layer (str):
-            Which per-feature distribution to use. One of:
-            - `"categorical"`: discrete Categorical over `kwargs` outcomes.
-            - `"gaussian"`: continuous Gaussian (no extra kwargs).
+        input_layers (dict | List[dict]):
+            Which per-feature distribution to use.
+            The provided dictionaries should be of the following form:
+            {
+                'name': <name: str>,
+                'args': <dictionary of arguments: dict>
+            }
+            for example: {'name': 'categorical', 'args': {'num_categories': 27}} or {'name': 'gaussian', 'args': {}}
+            If a dict is provided, the same input layer is used for all features. If a list of dictionaries is provided,
+            each feature will have its own input layer (input_layers[i] corresponds to feature i of the data).
         num_input_units (int):
             Number of parallel input units (e.g. mixtures/components) per feature.
         sum_product_layer (str):
@@ -207,12 +205,13 @@ def tabular_data(
 
     Raises:
         ValueError:
-          - If `input_layer` is not one of `"categorical"`, `"gaussian"`.
-          - If `region_graph="random-binary-tree"` but `num_features` is `None`.
+          - If one of the names of the input layers is not known, or the related arguments.
+          - If the number of input layers (the length of the list) does not match the number of features (`num_features` or inferred from `data`).
+          - If `region_graph="random-binary-tree"` but `num_features` is `None` and `data` is None.
           - If `region_graph="chow-liu-tree"` but `data` is `None`.
           - If `region_graph` is not one of the supported strings.
     """
-    
+        
     match region_graph:
         case "random-binary-tree":
             if num_features is None:
@@ -225,27 +224,23 @@ def tabular_data(
             rg = RandomBinaryTree(num_features)
         case "chow-liu-tree":
             if data is None:
-                raise ValueError(f"You must pass `data=` if you ask for `chow-liu-tree`.")
+                raise ValueError(f"You must pass `data=` if you ask for `chow-liu-tree`.")           
             rg = ChowLiuTree(
                 data=data,
-                input_type=input_layers,
-                num_categories=kwargs,
+                input_type=input_layers["name"] if isinstance(input_layers, dict) else input_layers,
+                num_categories=input_layers["args"]["num_categories"] if isinstance(input_layers, dict) and input_layers["name"] == "categorical" else None,
                 as_region_graph=True,
             )
         case _:
             raise ValueError(f"Unknown region graph called {region_graph}")
 
-    input_kwargs: dict[str, Any]
-    if isinstance(input_layers, str): # backwards compatibility
-        match input_layers:
-            case "categorical":
-                input_kwargs = {"num_categories": kwargs}
-            case "gaussian":
-                input_kwargs = {}
-            case _:
-                assert False
-        input_factories = name_to_input_layer_factory(input_layers, **input_kwargs)
+    if isinstance(input_layers, dict):
+        input_factories = name_to_input_layer_factory(input_layers["name"], **input_layers["args"])
     else:
+        if len(input_layers) != len(rg.scope):
+            raise ValueError(
+                f"Number of provided input layers ({len(input_layers)}) does not match the number of features ({rg.num_nodes})."
+            )
         input_factories = [
             name_to_input_layer_factory(input_layer["name"], **input_layer["args"])
             for input_layer in input_layers
@@ -264,7 +259,6 @@ def tabular_data(
     else:
         nary_sum_weight_factory = sum_weight_factory
         
-
     return rg.build_circuit(
         input_factory=input_factories,
         sum_product=sum_product_layer,
