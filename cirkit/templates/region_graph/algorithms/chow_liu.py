@@ -192,7 +192,7 @@ def _heterogeneous_mutual_info(data: Tensor, is_categorical_mask: list[bool], no
     # Precomputing marginals p(D) for every discrete variable
     p_D = {d_index: data[:, d_index].long().bincount(minlength=num_categories[d_index]).float() / data.shape[0] for d_index in discrete_subset.tolist()}
                
-    # precomputing all gaussian entropies H(C) for continuous variables
+    # precomputing gaussian entropy H(C) for each continuous variable
     h_C = {c_index: gaussian_entropy(data[:, c_index]) for c_index in continuous_subset.tolist()}
                
     # I(C, D) = H(C) - H(C | D)
@@ -211,6 +211,7 @@ def _heterogeneous_mutual_info(data: Tensor, is_categorical_mask: list[bool], no
             mi_matrix[d_index, c_index] = mi_matrix[c_index, d_index] # mutual information is symmetric
                         
     if normalize:
+        # NMI(X, Y) = 2 * I(X, Y) / (H(X) + H(Y))
         entropy = torch.zeros(data.shape[1], dtype=torch.float32, device=data.device)
         entropy[continuous_subset] = torch.tensor(list(h_C.values()), dtype=torch.float32, device=data.device)
         entropy[discrete_subset] = torch.tensor(
