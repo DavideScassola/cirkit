@@ -8,10 +8,10 @@ from cirkit.backend.torch.layers.input import (
     TorchBinomialLayer,
     TorchCategoricalLayer,
     TorchConstantValueLayer,
+    TorchDiscretizedLogisticLayer,
     TorchEmbeddingLayer,
     TorchEvidenceLayer,
     TorchGaussianLayer,
-    TorchDiscretizedLogisticLayer,
     TorchInputLayer,
     TorchPolynomialLayer,
 )
@@ -19,10 +19,10 @@ from cirkit.symbolic.layers import (
     BinomialLayer,
     CategoricalLayer,
     ConstantValueLayer,
+    DiscretizedLogisticLayer,
     EmbeddingLayer,
     EvidenceLayer,
     GaussianLayer,
-    DiscretizedLogisticLayer,
     HadamardLayer,
     KroneckerLayer,
     PolynomialLayer,
@@ -97,7 +97,9 @@ def compile_gaussian_layer(compiler: "TorchCompiler", sl: GaussianLayer) -> Torc
     )
 
 
-def compile_discretized_logistic_layer(compiler: "TorchCompiler", sl: DiscretizedLogisticLayer) -> TorchDiscretizedLogisticLayer:
+def compile_discretized_logistic_layer(
+    compiler: "TorchCompiler", sl: DiscretizedLogisticLayer
+) -> TorchDiscretizedLogisticLayer:
     mean = compiler.compile_parameter(sl.mean)
     stddev = compiler.compile_parameter(sl.stddev)
     if sl.log_partition is not None:

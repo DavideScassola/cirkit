@@ -13,9 +13,9 @@ from cirkit.symbolic.initializers import (
 from cirkit.symbolic.layers import (
     BinomialLayer,
     CategoricalLayer,
+    DiscretizedLogisticLayer,
     EmbeddingLayer,
     GaussianLayer,
-    DiscretizedLogisticLayer,
     InputLayer,
     ProductLayer,
     SumLayer,

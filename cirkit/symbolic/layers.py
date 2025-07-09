@@ -611,7 +611,12 @@ class DiscretizedLogisticLayer(InputLayer):
 
     @property
     def config(self) -> Mapping[str, Any]:
-        return {"scope": self.scope, "num_output_units": self.num_output_units, "marginal_mean": self.marginal_mean, "marginal_stddev": self.marginal_stddev}
+        return {
+            "scope": self.scope,
+            "num_output_units": self.num_output_units,
+            "marginal_mean": self.marginal_mean,
+            "marginal_stddev": self.marginal_stddev,
+        }
 
     @property
     def params(self) -> Mapping[str, Parameter]:
@@ -619,8 +624,8 @@ class DiscretizedLogisticLayer(InputLayer):
         if self.log_partition is not None:
             params.update(log_partition=self.log_partition)
         return params
-    
-    
+
+
 class PolynomialLayer(InputLayer):
     """A symbolic layer that evaluates polynomials."""
 

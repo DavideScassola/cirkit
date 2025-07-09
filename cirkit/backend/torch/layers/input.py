@@ -661,6 +661,7 @@ class TorchGaussianLayer(TorchExpFamilyLayer):
         samples = samples.permute(1, 2, 0)  # (F, K, N)
         return samples
 
+
 class TorchDiscretizedLogisticLayer(TorchExpFamilyLayer):
     """The Discretizecd Gaussian distribution layer. Optionally, this layer can encode unnormalized Discretizecd Gaussian
     distributions with the spefication of a log-partition function parameter."""
@@ -755,9 +756,11 @@ class TorchDiscretizedLogisticLayer(TorchExpFamilyLayer):
 
     @property
     def config(self) -> Mapping[str, Any]:
-        return {"num_output_units": self.num_output_units,
-                "marginal_mean": self.marginal_mean,
-                "marginal_stddev": self.marginal_stddev}
+        return {
+            "num_output_units": self.num_output_units,
+            "marginal_mean": self.marginal_mean,
+            "marginal_stddev": self.marginal_stddev,
+        }
 
     @property
     def params(self) -> Mapping[str, TorchParameter]:
@@ -765,7 +768,7 @@ class TorchDiscretizedLogisticLayer(TorchExpFamilyLayer):
         if self.log_partition is not None:
             params["log_partition"] = self.log_partition
         return params
-    
+
     def log1mexp(self, x: Tensor) -> Tensor:
         # Source: https://github.com/wouterkool/estimating-gradients-without-replacement/blob/9d8bf8b/bernoulli/gumbel.py#L7-L11
         # Computes log(1-exp(-|x|))
@@ -777,35 +780,42 @@ class TorchDiscretizedLogisticLayer(TorchExpFamilyLayer):
             torch.log1p(-torch.exp(x)),
         )
         return x
-    
-    def discrete_logistic_ll(self, x: Tensor, loc: Tensor, scale: Tensor, bin_size = 1.0) -> Tensor:
+
+    def discrete_logistic_ll(self, x: Tensor, loc: Tensor, scale: Tensor, bin_size=1.0) -> Tensor:
         precision = 1 / scale
-        a = (x - bin_size/2 - loc) * precision
-        return -a + self.log1mexp(bin_size*precision) + torch.nn.functional.logsigmoid(( x + bin_size/2 - loc)* precision ) + torch.nn.functional.logsigmoid(a)
-        
+        a = (x - bin_size / 2 - loc) * precision
+        return (
+            -a
+            + self.log1mexp(bin_size * precision)
+            + torch.nn.functional.logsigmoid((x + bin_size / 2 - loc) * precision)
+            + torch.nn.functional.logsigmoid(a)
+        )
+
     def rescale(self, x: Tensor) -> Tensor:
         """Rescale the input x using the marginal mean and standard deviation."""
         return (x - self.marginal_mean) / self.marginal_stddev
-    
+
     def logistic_distribution_scale(self) -> Tensor:
         """Compute the scale of the logistic distribution."""
         # The scale is the standard deviation of the logistic distribution for s=1
         # which is sqrt(pi^2 / 3)
-        return (torch.pi**2 / 3)**0.5
-        
+        return (torch.pi**2 / 3) ** 0.5
+
     def log_unnormalized_likelihood(self, x: Tensor) -> Tensor:
-        mean = self.mean().unsqueeze(dim=1) # (F, 1, K)
-        stddev = self.stddev().unsqueeze(dim=1) # (F, 1, K)
-        
+        mean = self.mean().unsqueeze(dim=1)  # (F, 1, K)
+        stddev = self.stddev().unsqueeze(dim=1)  # (F, 1, K)
+
         x_rounded = x.round()  # Round the input to the nearest integer
-        x_out = self.discrete_logistic_ll(self.rescale(x_rounded), mean, stddev, bin_size=1/self.marginal_stddev)  # (F, B, K)
-        #x_check = torch.log(torch.nn.functional.sigmoid((self.rescale(x_rounded + 0.5) - mean)/stddev) - torch.nn.functional.sigmoid((self.rescale(x_rounded  - 0.5) - mean)/stddev))
+        x_out = self.discrete_logistic_ll(
+            self.rescale(x_rounded), mean, stddev, bin_size=1 / self.marginal_stddev
+        )  # (F, B, K)
+        # x_check = torch.log(torch.nn.functional.sigmoid((self.rescale(x_rounded + 0.5) - mean)/stddev) - torch.nn.functional.sigmoid((self.rescale(x_rounded  - 0.5) - mean)/stddev))
 
         if self.log_partition is not None:
             log_partition = self.log_partition()  # (F, K)
             x_out = x_out + log_partition.unsqueeze(dim=1)
         return x_out
-    
+
     def log_partition_function(self) -> Tensor:
         if self.log_partition is None:
             return torch.zeros(
@@ -813,18 +823,21 @@ class TorchDiscretizedLogisticLayer(TorchExpFamilyLayer):
             )
         log_partition = self.log_partition()  # (F, K)
         return log_partition.unsqueeze(dim=1)  # (F, 1, K)
-    
+
     def sample(self, num_samples: int = 1) -> Tensor:
         """Sample from the Discretized Gaussian distribution."""
-        # k = (np.pi**2 / 3) **0.5 
+
+        # k = (np.pi**2 / 3) **0.5
         def quantile_function(p: Tensor, loc: Tensor, scale: Tensor) -> Tensor:
             """Compute the quantile function for the logistic distribution."""
             return loc + scale * torch.log(p / (1 - p))
-        
-        samples = quantile_function(torch.rand(size=(num_samples, *self.mean().shape), device=self.mean().device),
-                                    self.mean(),
-                                    self.stddev()).detach() 
-        
+
+        samples = quantile_function(
+            torch.rand(size=(num_samples, *self.mean().shape), device=self.mean().device),
+            self.mean(),
+            self.stddev(),
+        ).detach()
+
         samples = ((samples * self.marginal_stddev) + self.marginal_mean).round()
         samples = samples.permute(1, 2, 0)  # (F, K, N)
         return samples
