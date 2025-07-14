@@ -534,7 +534,12 @@ class TorchBinomialLayer(TorchExpFamilyLayer):
         return torch.zeros(size=(self.num_folds, 1, self.num_output_units), device=device)
 
     def sample(self, num_samples: int = 1) -> Tensor:
-        probs = self.probs() if self.probs() is not None else torch.exp(self.logits())
+        if self.logits is not None:
+            logits = self.logits()  # (F, 1, K)
+            dist = distributions.Binomial(self.total_count, logits=logits)
+        else:
+            probs = self.probs()  # (F, 1, K)
+            dist = distributions.Binomial(self.total_count, probs=probs)
         dist = distributions.Binomial(self.total_count, probs=probs)
         samples = dist.sample((num_samples,))  # (num_samples, F, K)
         samples = samples.permute(1, 2, 0)  # (F, K, num_samples)
