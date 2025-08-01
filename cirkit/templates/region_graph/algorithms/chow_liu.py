@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from scipy import sparse as sp
-from torch import LongTensor, Tensor
+from torch import Tensor
 
 from cirkit.templates.region_graph.algorithms.utils import tree2rg
 from cirkit.templates.region_graph.graph import RegionGraph
@@ -10,7 +10,7 @@ from cirkit.templates.region_graph.graph import RegionGraph
 # pylint: disable-next=invalid-name
 def ChowLiuTree(
     data: Tensor,
-    input_type: str | list[dict],
+    input_type: str | list[str],
     root: int | None = None,
     chunk_size: int | None = None,
     num_categories: int | None = None,
@@ -47,8 +47,9 @@ def ChowLiuTree(
     assert data.ndim == 2
     assert root is None or -1 < root < data.size(-1)
     if isinstance(input_type, list):
-        is_categorical_mask = [name == "categorical" for name in input_type]
-        mutual_info = _heterogeneous_mutual_info(data, is_categorical_mask=is_categorical_mask)
+        mutual_info = _heterogeneous_mutual_info(
+            data, is_categorical_mask=[name == "categorical" for name in input_type]
+        )
     elif input_type == "categorical":
         if num_bins is not None:
             if num_categories is None:
@@ -85,10 +86,10 @@ def _maximum_spanning_tree(
     """
     mst = sp.csgraph.minimum_spanning_tree(-(adj_matrix.cpu().numpy() + 1.0), overwrite=True)
     if root is None:
-        dist_from_all_nodes = sp.csgraph.dijkstra(
+        dist_from_all_nodes: np.ndarray = sp.csgraph.dijkstra(
             abs(mst).todense(), directed=False, return_predecessors=False
         )
-        root = np.argmin(np.max(dist_from_all_nodes, axis=1))
+        root = np.argmin(np.max(dist_from_all_nodes, axis=1)).item()
     bfs, tree = sp.csgraph.breadth_first_order(
         mst, directed=False, i_start=root, return_predecessors=True
     )
@@ -97,7 +98,7 @@ def _maximum_spanning_tree(
 
 
 def _categorical_mutual_info(
-    data: LongTensor,
+    data: Tensor,
     alpha: float = 0.01,
     num_categories: int | None = None,
     chunk_size: int | None = None,
@@ -133,9 +134,7 @@ def _categorical_mutual_info(
     joint_counts = joint_counts.view(n_features, n_features, num_categories, num_categories)
     marginal_counts = joint_counts[idx_features, idx_features][:, idx_categories, idx_categories]
 
-    marginals = (marginal_counts + num_categories * alpha) / (
-        n_samples + num_categories**2 * alpha
-    )
+    marginals = (marginal_counts + num_categories * alpha) / (n_samples + num_categories**2 * alpha)
     joints = (joint_counts + alpha) / (n_samples + num_categories**2 * alpha)
     joints[idx_features, idx_features] = torch.diag_embed(
         marginals
@@ -148,26 +147,30 @@ def _categorical_mutual_info(
 def _heterogeneous_mutual_info(
     data: Tensor, is_categorical_mask: list[bool], normalize: bool = True
 ) -> Tensor:
-    """Computes the mutual information matrix for heterogeneous data (both discrete/categorical data and countinuous).
-    The mutual information among continuous variables is computed as if they were a Multivariate Gaussian.
-    The mutual information among discrete variables is computed using the categorical mutual information defined above.
-    The mutual information between a continuous variable C and discrete variable D is computed using the formula:
+    """Computes the mutual information (MI) matrix for heterogeneous data
+    (both discrete/categorical data and continuous).
+    The MI among continuous variables is computed as if they were a Multivariate Gaussian.
+    The MI among discrete variables is computed using the categorical mutual information defined above.
+    The MI between a continuous variable C and discrete variable D is computed using the formula:
         I(C, D) = H(C) - H(C | D)
-    assuming gaussian distributions p(C|D) for continuous variables when conditioned on discrete variables
-    and gaussian marginals p(c).
+    assuming gaussian distributions p(C|D) for continuous variables when conditioned on discrete
+    variables and gaussian marginals p(c).
 
     Args:
-        data (Tensor): The input data over which computing the MI matrix,
+        data: The input data over which computing the MI matrix,
             it must be in tabular form (i.e. a matrix).
-        is_categorical_mask (list[bool]): A boolean mask of the same length as the number of columns in `data`, indicating if the column has to be considered categorical.
-        A list of strings indicating the type of each variable whether each column in the data is categorical (True) or continuous (False).
-        normalize (bool): If True, normalizes the mutual information matrix by the entropy of each variable. NMI(X,Y) = 2 * I(X,Y) / (H(X) + H(Y)).
+        is_categorical_mask: A boolean mask of the same length as the number
+            of columns in `data`, indicating if the column has to be considered categorical.
+        A list of strings indicating the type of each variable whether each column in the
+            data is categorical (True) or continuous (False).
+        normalize: If True, normalizes the mutual information matrix by the entropy
+            of each variable. NMI(X,Y) = 2 * I(X,Y) / (H(X) + H(Y)).
 
     Returns:
         The mutual information matrix (main diagonal is 0).
     """
 
-    GAUSSIAN_ENTROPY_EPSILON = 1e-4
+    gaussian_entropy_epsilon = 1e-4
 
     is_categorical = torch.tensor(is_categorical_mask, dtype=torch.bool, device=data.device)
     continuous_subset = torch.where(~is_categorical)[0]
@@ -177,19 +180,22 @@ def _heterogeneous_mutual_info(
 
     # Compute mutual information for continuous variables as they were a Multivariate Gaussian
     if len(continuous_subset) > 1:
-        mi_matrix[continuous_subset.unsqueeze(1), continuous_subset] = -0.5 * torch.log(
-            1 - torch.corrcoef(data[:, continuous_subset].t()).fill_diagonal_(0) ** 2
+        mi_matrix[continuous_subset.unsqueeze(1), continuous_subset] = (
+            -0.5
+            * torch.log(
+                1 - torch.corrcoef(data[:, continuous_subset].t()).fill_diagonal_(0) ** 2
+            ).float()
         )
 
     # Compute mutual information for discrete variables
     if len(discrete_subset) > 1:
         mi_matrix[discrete_subset.unsqueeze(1), discrete_subset] = _categorical_mutual_info(
             data=data[:, discrete_subset].long(), num_categories=None, chunk_size=None
-        )
+        ).float()
 
     def gaussian_entropy(x: Tensor) -> Tensor:
         return 0.5 * (
-            torch.log(2 * torch.pi * torch.var(x, unbiased=False) + GAUSSIAN_ENTROPY_EPSILON) + 1
+            torch.log(2 * torch.pi * torch.var(x, unbiased=False) + gaussian_entropy_epsilon) + 1
         )
 
     # Precomputing number of categories for discrete variables
@@ -198,14 +204,14 @@ def _heterogeneous_mutual_info(
     }
 
     # Precomputing marginals p(D) for every discrete variable
-    p_D = {
+    p_d = {
         d_index: data[:, d_index].long().bincount(minlength=num_categories[d_index]).float()
         / data.shape[0]
         for d_index in discrete_subset.tolist()
     }
 
     # precomputing gaussian entropy H(C) for each continuous variable
-    h_C = {c_index: gaussian_entropy(data[:, c_index]) for c_index in continuous_subset.tolist()}
+    h_c = {c_index: gaussian_entropy(data[:, c_index]) for c_index in continuous_subset.tolist()}
 
     # I(C, D) = H(C) - H(C | D)
     for c_index in continuous_subset.tolist():
@@ -213,7 +219,7 @@ def _heterogeneous_mutual_info(
             # H(C | D) = sum_D{ integral_C{ p(C|D)p(D) log_p(C|D) } } = sum_D{ -H[p(C|D)]p(D) }
 
             # Computing H[p(C|D)] for each category of D
-            h_C_given_D = torch.stack(
+            h_c_given_d = torch.stack(
                 [
                     gaussian_entropy(data[:, c_index][data[:, d_index] == i])
                     for i in range(num_categories[d_index])
@@ -222,7 +228,7 @@ def _heterogeneous_mutual_info(
             )
 
             # I(C, D) = H(C) - H(C | D) = H(C) - sum_D{ H[p(C|D)]p(D) }
-            mi_matrix[c_index, d_index] = h_C[c_index] - torch.sum(h_C_given_D * p_D[d_index])
+            mi_matrix[c_index, d_index] = h_c[c_index] - torch.sum(h_c_given_d * p_d[d_index])
             mi_matrix[d_index, c_index] = mi_matrix[
                 c_index, d_index
             ]  # mutual information is symmetric
@@ -231,10 +237,10 @@ def _heterogeneous_mutual_info(
         # NMI(X, Y) = 2 * I(X, Y) / (H(X) + H(Y))
         entropy = torch.zeros(data.shape[1], dtype=torch.float32, device=data.device)
         entropy[continuous_subset] = torch.tensor(
-            list(h_C.values()), dtype=torch.float32, device=data.device
+            list(h_c.values()), dtype=torch.float32, device=data.device
         )
         entropy[discrete_subset] = torch.tensor(
-            [-(p.log() * p).sum() for p in p_D.values()], dtype=torch.float32, device=data.device
+            [-(p.log() * p).sum() for p in p_d.values()], dtype=torch.float32, device=data.device
         )
         mi_matrix = 2 * mi_matrix / (entropy.unsqueeze(0) + entropy.unsqueeze(1))
 

@@ -1,23 +1,26 @@
 import functools
-from typing import Any
+from typing import Any, Mapping
 
 import numpy as np
 from torch import Tensor
 
 from cirkit.symbolic.circuit import Circuit
-from cirkit.symbolic.parameters import mixing_weight_factory
+from cirkit.symbolic.parameters import ParameterFactory, mixing_weight_factory
 from cirkit.templates.region_graph import (
     ChowLiuTree,
     PoonDomingos,
     QuadGraph,
     QuadTree,
     RandomBinaryTree,
+    RegionGraph,
 )
 from cirkit.templates.utils import (
+    InputLayerFactory,
     Parameterization,
     name_to_input_layer_factory,
     parameterization_to_factory,
 )
+from cirkit.utils.scope import Scope
 
 
 def image_data(
@@ -76,6 +79,15 @@ def image_data(
     Raises:
         ValueError: If one of the arguments is not one of the specified allowed ones.
     """
+    if (
+        not isinstance(image_shape, tuple)
+        or len(image_shape) != 3
+        or any(d <= 0 for d in image_shape)
+    ):
+        raise ValueError(
+            "Expected the image shape to be a tuple of three positive integers,"
+            f" but found {image_shape}"
+        )
     if region_graph not in [
         "quad-tree-2",
         "quad-tree-4",
@@ -102,9 +114,9 @@ def image_data(
         case "quad-graph":
             rg = QuadGraph(image_shape)
         case "random-binary-tree":
-            rg = RandomBinaryTree(np.prod(image_shape))
+            rg = RandomBinaryTree(image_shape[0] * image_shape[1] * image_shape[2])
         case "poon-domingos":
-            delta = max(np.ceil(image_shape[1] / 8), np.ceil(image_shape[2] / 8))
+            delta = int(max(np.ceil(image_shape[1] / 8), np.ceil(image_shape[2] / 8)))
             rg = PoonDomingos(image_shape, delta=delta)
         case _:
             raise ValueError(f"Unknown region graph called {region_graph}")
@@ -137,6 +149,7 @@ def image_data(
     sum_weight_factory = parameterization_to_factory(sum_weight_param)
 
     # Set the nary sum weight factory
+    nary_sum_weight_factory: ParameterFactory
     if use_mixing_weights:
         nary_sum_weight_factory = functools.partial(
             mixing_weight_factory, param_factory=sum_weight_factory
@@ -175,38 +188,42 @@ def tabular_data(
     supporting either a fixed random-binary-tree or a learned Chow–Liu tree.
 
     Args:
-        region_graph (str, default="random-binary-tree"):
+        region_graph:
             Which region graph to use.
             - `"random-binary-tree"`: build a random binary tree over the feature indices.
             - `"chow-liu-tree"`: learn a Chow–Liu tree from data.
-        num_features (int, optional):
+        num_features:
             Number of features (columns) in the dataset.
             **Required** if `region_graph="random-binary-tree"`.
-        data (Tensor, optional):
+        data:
             A Torch tensor of shape `(n_samples, n_features)`.
-            **Required** if `region_graph="chow-liu-tree"`, since the tree structure is learned from these samples.
-        input_layers (dict | List[dict]):
+            **Required** if `region_graph="chow-liu-tree"`, since the tree structure is
+                learned from these samples.
+        input_layers:
             Which per-feature distribution to use.
             The provided dictionaries should be of the following form:
             {
                 'name': <name: str>,
                 'args': <dictionary of arguments: dict>
             }
-            for example: {'name': 'categorical', 'args': {'num_categories': 27}} or {'name': 'gaussian', 'args': {}}
-            If a dict is provided, the same input layer is used for all features. If a list of dictionaries is provided,
-            each feature will have its own input layer (input_layers[i] corresponds to feature i of the data).
-        num_input_units (int):
+            for example: {'name': 'categorical', 'args': {'num_categories': 27}}
+                or {'name': 'gaussian', 'args': {}}
+            If a dict is provided, the same input layer is used for all features.
+                If a list of dictionaries is provided,
+            each feature will have its own input layer (input_layers[i] corresponds
+                to feature i of the data).
+        num_input_units:
             Number of parallel input units (e.g. mixtures/components) per feature.
-        sum_product_layer (str):
+        sum_product_layer:
             Which inner sum/product decomposition to use. E.g. `"cp"`, `"cpt"`, or `"tucker"`.
-        num_sum_units (int):
+        num_sum_units:
             Number of sum (or mixing) units in each sum layer.
-        num_classes (int, default=1):
+        num_classes:
             Number of output classes (or root-layer mixtures). Often 1 for pure density estimation.
-        sum_weight_param (Parameterization | None, default=None):
+        sum_weight_param:
             If provided, a `Parameterization` object specifying activation & initialization
             for sum-layer weights.  Defaults internally to a softmax + Normal init.
-        use_mixing_weights (bool, default=True):
+        use_mixing_weights:
             Whether to use “mixing” sum layers (i.e. learn a linear combination of child outputs)
             for nodes of arity >1.  If False, falls back to a matrix-vector product.
 
@@ -218,7 +235,8 @@ def tabular_data(
     Raises:
         ValueError:
           - If one of the names of the input layers is not known, or the related arguments.
-          - If the number of input layers (the length of the list) does not match the number of features (`num_features` or inferred from `data`).
+          - If the number of input layers (the length of the list) does not match the number
+                of features (`num_features` or inferred from `data`).
           - If `region_graph="random-binary-tree"` but `num_features` is `None` and `data` is None.
           - If `region_graph="chow-liu-tree"` but `data` is `None`.
           - If `region_graph` is not one of the supported strings.
@@ -237,41 +255,51 @@ def tabular_data(
         case "chow-liu-tree":
             if data is None:
                 raise ValueError(f"You must pass `data=` if you ask for `chow-liu-tree`.")
-            rg = ChowLiuTree(
+            rg_result = ChowLiuTree(
                 data=data,
-                input_type=input_layers["name"]
-                if isinstance(input_layers, dict)
-                else [input_layers["name"] for input_layers in input_layers],
-                num_categories=input_layers["args"]["num_categories"]
-                if isinstance(input_layers, dict) and input_layers["name"] == "categorical"
-                else None,
+                input_type=(
+                    input_layers["name"]
+                    if isinstance(input_layers, dict)
+                    else [input_layers["name"] for input_layers in input_layers]
+                ),
+                num_categories=(
+                    input_layers["args"]["num_categories"]
+                    if isinstance(input_layers, dict) and input_layers["name"] == "categorical"
+                    else None
+                ),
                 as_region_graph=True,
             )
+            if not isinstance(rg_result, RegionGraph):
+                raise ValueError(f"Expected a RegionGraph, but got {type(rg_result).__name__}.")
+            rg = rg_result
         case _:
             raise ValueError(f"Unknown region graph called {region_graph}")
-
-    if isinstance(input_layers, dict):
-        input_factories = name_to_input_layer_factory(input_layers["name"], **input_layers["args"])
-    else:
-        if len(input_layers) != len(rg.scope):
-            raise ValueError(
-                f"Number of provided input layers ({len(input_layers)}) does not match the number of features ({rg.num_nodes})."
-            )
-        input_factories = [
-            name_to_input_layer_factory(input_layer["name"], **input_layer["args"])
-            for input_layer in input_layers
-        ]
 
     if sum_weight_param is None:
         sum_weight_param = Parameterization(activation="softmax", initialization="normal")
     sum_weight_factory = parameterization_to_factory(sum_weight_param)
 
+    nary_sum_weight_factory: ParameterFactory
     if use_mixing_weights:
         nary_sum_weight_factory = functools.partial(
             mixing_weight_factory, param_factory=sum_weight_factory
         )
     else:
         nary_sum_weight_factory = sum_weight_factory
+
+    input_factories: InputLayerFactory | Mapping[Scope, InputLayerFactory]
+    if isinstance(input_layers, dict):
+        input_factories = name_to_input_layer_factory(input_layers["name"], **input_layers["args"])
+    else:
+        if len(input_layers) != len(rg.scope):
+            raise ValueError(
+                f"Number of provided input layers ({len(input_layers)}) does \
+                not match the number of features ({len(rg.scope)})."
+            )
+        input_factories = {
+            Scope([i]): name_to_input_layer_factory(input_layer["name"], **input_layer["args"])
+            for i, input_layer in enumerate(input_layers)
+        }
 
     return rg.build_circuit(
         input_factory=input_factories,
