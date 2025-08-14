@@ -350,7 +350,7 @@ def pc2qpc(
                 learn_ff=learn_ff,
                 z_quad=z_quad,
                 tensor_parameter=node.mean.nodes[0],
-                reparam=None if len(node.mean.nodes) == 1 else node.mean.nodes[0],
+                reparam=None if len(node.mean.nodes) == 1 else node.mean.nodes[1],
             )
             node.stddev = PICInputNet(
                 num_variables=node.num_variables * node.num_folds,
@@ -363,7 +363,7 @@ def pc2qpc(
                 learn_ff=learn_ff,
                 z_quad=z_quad,
                 tensor_parameter=node.stddev.nodes[0],
-                reparam=None if len(node.stddev.nodes) == 1 else node.stddev.nodes[0],
+                reparam=None if len(node.stddev.nodes) == 1 else node.stddev.nodes[1],
             )
         elif isinstance(node, (TorchSumLayer, TorchTuckerLayer, TorchCPTLayer)):
             if isinstance(node, TorchSumLayer) and node.arity > 1:
