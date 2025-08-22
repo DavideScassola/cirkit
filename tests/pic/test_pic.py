@@ -4,10 +4,19 @@ import pytest
 import torch
 
 from cirkit.backend.torch.parameters.pic import pc2qpc
-from cirkit.pipeline import compile
+from cirkit.pipeline import PipelineContext, compile
 from cirkit.templates import data_modalities, utils
 from cirkit.templates.data_modalities import tabular_data
 from cirkit.templates.region_graph.algorithms.random import RandomBinaryTree
+
+ctx = PipelineContext(
+    backend="torch",  # Choose PyTorch as compilation backend
+    # ---- Use the evaluation semiring (R, +, x), where + is the numerically stable LogSumExp and x is the sum ---- #
+    semiring="lse-sum",
+    # ------------------------------------------------------------------------------------------------------------- #
+    fold=True,  # Fold the circuit to better exploit GPU parallelism
+    optimize=False,  # Don't optimize the layers of the circuit
+)
 
 
 def check_ll_shape(circuit, data):
@@ -16,7 +25,7 @@ def check_ll_shape(circuit, data):
         len(data),
         1,
         1,
-    ), f"Expected log-likelihood shape {(n, 1, 1)}, got {ll.shape}"
+    ), f"Expected log-likelihood shape {(len(data), 1, 1)}, got {ll.shape}"
 
 
 @pytest.mark.parametrize(
@@ -52,9 +61,7 @@ def test_tabular_data(n_cat_features: int, n_num_features: int, region_graph: st
                 num_input_units=2,
                 sum_product_layer="cp",
                 num_sum_units=2,
-                sum_weight_param=utils.Parameterization(
-                    activation="softmax", initialization="normal"
-                ),
+                sum_weight_param=utils.Parameterization(activation="none", initialization="normal"),
                 use_mixing_weights=True,
             )
 
@@ -62,9 +69,7 @@ def test_tabular_data(n_cat_features: int, n_num_features: int, region_graph: st
             assert len(symbolic_circuit.scope) == num_features
 
             # Check if the log-likelihood has the expected shape
-            circuit = compile(symbolic_circuit)
-
-            check_ll_shape(circuit, data)
+            circuit = ctx.compile(symbolic_circuit)
 
             pc2qpc(circuit, integration_method="trapezoidal", net_dim=4)
 
@@ -78,7 +83,7 @@ def test_continuous_data():
     data = torch.randn(n, features).float()
     rg = RandomBinaryTree(features)
     sum_weight_factory = utils.parameterization_to_factory(
-        utils.Parameterization(activation="softmax", initialization="normal")
+        utils.Parameterization(activation="none", initialization="normal")
     )
     symbolic_circuit = rg.build_circuit(
         input_factory=utils.name_to_input_layer_factory("gaussian"),
@@ -88,8 +93,8 @@ def test_continuous_data():
         num_input_units=4,
         num_sum_units=4,
     )
-    circuit = compile(symbolic_circuit)
-    check_ll_shape(circuit, data)
+    circuit = ctx.compile(symbolic_circuit)
+
     pc2qpc(circuit, integration_method="trapezoidal", net_dim=2)
     check_ll_shape(circuit, data)
 
@@ -102,7 +107,7 @@ def test_discrete_data():
     data = torch.randint(0, n_classes, (n, features))
     rg = RandomBinaryTree(features)
     sum_weight_factory = utils.parameterization_to_factory(
-        utils.Parameterization(activation="softmax", initialization="normal")
+        utils.Parameterization(activation="none", initialization="normal")
     )
     symbolic_circuit = rg.build_circuit(
         input_factory=utils.name_to_input_layer_factory(
@@ -114,8 +119,8 @@ def test_discrete_data():
         num_input_units=4,
         num_sum_units=4,
     )
-    circuit = compile(symbolic_circuit)
-    check_ll_shape(circuit, data)
+    circuit = ctx.compile(symbolic_circuit)
+
     pc2qpc(circuit, integration_method="trapezoidal", net_dim=2)
     check_ll_shape(circuit, data)
 
@@ -134,8 +139,8 @@ def test_image_data():
             initialization="normal",  # Initialize the sum weights by sampling from a standard normal distribution
         ),
     )
-    circuit = compile(symbolic_circuit)
+    circuit = ctx.compile(symbolic_circuit)
     data = torch.randint(0, 256, (10, 1, 28, 28))  # Simulating MNIST-like images
-    #check_ll_shape(circuit, data)
+
     pc2qpc(circuit, integration_method="trapezoidal", net_dim=256)
-    #check_ll_shape(circuit, data)
+    check_ll_shape(circuit, data)

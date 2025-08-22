@@ -309,5 +309,4 @@ def tabular_data(
         num_input_units=num_input_units,
         num_sum_units=num_sum_units,
         num_classes=num_classes,
-        factorize_multivariate=True,
     )
