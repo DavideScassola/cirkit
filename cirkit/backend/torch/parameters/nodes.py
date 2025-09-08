@@ -49,8 +49,7 @@ class TorchParameterNode(AbstractTorchModule, ABC):
 
     @torch.no_grad()
     def reset_parameters(self) -> None: ...
-
-
+    
 class TorchParameterInput(TorchParameterNode, ABC):
     """The torch parameter input node. A parameter input is a parameter node in the
     computational graph that comptues parameter that does __not__ have inputs. See
@@ -937,3 +936,62 @@ class TorchPolynomialDifferential(TorchUnaryParameterOp):
         for _ in range(self.order):
             x = self._diff_once(x)
         return x  # shape (F, K, dp1-ord).
+
+class TorchLowerTriangularTransform(TorchParameterOp):
+    """
+    Transform a flat tensor of lower-triangular entries into a Cholesky factor with positive diagonal.
+    """
+
+    def __init__(self, in_shapes: tuple[int, int, int], num_folds=1):
+        """
+        Args:
+            shape: The expected output shape (K, D_out, D_out).
+                   Internally, the input tensor will have shape (K, D),
+                   where D = D_out * (D_out + 1) // 2
+        """
+        #print(f"in_shapes: {in_shapes}, type: {type(in_shapes)}")
+        if len(in_shapes) == 1 and isinstance(in_shapes[0], tuple):
+            in_shapes = in_shapes[0]
+        K, D_out, _ = in_shapes
+        super().__init__((K, D_out,D_out), num_folds=num_folds)
+        self._out_shape = (K, D_out, D_out)
+        self._dim = D_out
+
+        # Precompute triangular indices
+        self.register_buffer(
+            "tril_indices", torch.tril_indices(row=D_out, col=D_out, offset=0)
+        )
+        self.register_buffer(
+            "diag_indices", torch.arange(D_out)
+        )
+
+    @property
+    def shape(self) -> tuple[int, int, int]:
+        return self._out_shape
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Tensor of shape (F, D_out, D_out), full matrix form
+
+        Returns:
+            Tensor of shape (F, D_out, D_out), lower-triangular with positive diagonals
+        
+        # Mask upper triangle to zero
+        x = torch.tril(x)
+
+        # Apply softplus to diagonal for positive definiteness
+        D = x.shape[-1]
+        diag_idx = torch.arange(D, device=x.device)
+        x[:, diag_idx, diag_idx] = torch.nn.functional.softplus(x[:, diag_idx, diag_idx])
+        """
+        x = torch.tril(x)
+
+        # Apply softplus to the diagonal to ensure positivity
+        diag = torch.diagonal(x, dim1=-2, dim2=-1)
+        diag_sp = torch.nn.functional.softplus(diag)
+
+        # Replace the diagonal with the transformed version (safe for autograd)
+        x = x.clone()  # avoid in-place op on a view
+        x.diagonal(dim1=-2, dim2=-1).copy_(diag_sp)
+        return x

@@ -1083,3 +1083,98 @@ class TorchPolynomialLayer(TorchInputFunctionLayer):
     def forward(self, x: Tensor) -> Tensor:
         coeff = self.coeff()  # shape (F, Ko, dp1)
         return self.semiring.map_from(TorchPolynomialLayer._polyval(coeff, x), SumProductSemiring)
+
+
+class TorchMultivariateGaussianLayer(TorchExpFamilyLayer):
+    """A torch layer representing multivariate Gaussian distributions with full covariance.
+    Each output unit corresponds to a multivariate Gaussian parameterized via Cholesky decomposition.
+    """
+
+    def __init__(
+        self,
+        scope_idx: Tensor,  # shape (D)
+        num_output_units: int,
+        *,
+        mean: TorchParameter,           # shape (K, D)
+        cholesky: TorchParameter,       # shape (K, D, D), lower-triangular
+        log_partition: TorchParameter | None = None,
+        semiring: Semiring | None = None,
+    ) -> None:
+        num_variables = scope_idx.shape[-1]
+        if num_variables < 2:
+            raise ValueError("Multivariate Gaussian requires at least 2 variables")
+
+        super().__init__(scope_idx, num_output_units, semiring=semiring)
+
+        expected_mean_shape = (num_output_units, num_variables)
+        expected_cholesky_shape = (num_output_units, num_variables, num_variables)
+        expected_log_partition_shape = (num_output_units)
+
+        if mean.shape != expected_mean_shape:
+            raise ValueError(f"Expected mean shape {expected_mean_shape}, but got {mean.shape}")
+        if cholesky.shape != expected_cholesky_shape:
+            raise ValueError(f"Expected cholesky shape {expected_cholesky_shape}, but got {cholesky.shape}")
+        if log_partition is not None and log_partition.shape != expected_log_partition_shape:
+            raise ValueError(f"Expected log_partition shape {expected_log_partition_shape}, but got {log_partition.shape}")
+
+        self.mean = mean
+        self.cholesky = cholesky
+        self.log_partition = log_partition
+
+    @property
+    def config(self) -> Mapping[str, Any]:
+        return {"num_output_units": self.num_output_units}
+
+    @property
+    def params(self) -> Mapping[str, TorchParameter]:
+        params = {"mean": self.mean, "cholesky": self.cholesky}
+        if self.log_partition is not None:
+            params["log_partition"] = self.log_partition
+        return params
+
+    def log_unnormalized_likelihood(self, x: Tensor) -> Tensor:
+        # Shapes: mean (F, K, D), cholesky (F, K, D, D), x (F, B, D)
+        F, B, D = x.shape
+        K = self.num_output_units
+
+        mean = self.mean()             # (F, K, D)
+        scale_tril = self.cholesky()  # (F, K, D, D)
+
+        # Expand x to (F, B, 1, D)
+        x = x.unsqueeze(2)  # (F, B, 1, D)
+
+        # Compute log prob using batch distribution
+        log_probs = []
+        for f in range(F):
+            mvn = torch.distributions.MultivariateNormal(
+                loc=mean[f],
+                scale_tril=scale_tril[f]
+            )
+            log_probs.append(mvn.log_prob(x[f]))  # (B, K)
+
+        log_probs = torch.stack(log_probs, dim=0).transpose(2, 1)  # (F, K, B)
+
+        if self.log_partition is not None:
+            log_probs += self.log_partition().unsqueeze(-1)  # (F, K, B)
+
+        return log_probs.transpose(2, 1)  # (F, B, K)
+
+    def log_partition_function(self) -> Tensor:
+        if self.log_partition is None:
+            return torch.zeros((self.num_folds, 1, self.num_output_units), device=self.mean.device)
+        return self.log_partition().unsqueeze(dim=1)  # (F, 1, K)
+
+    def sample(self, num_samples: int = 1) -> Tensor:
+        mean = self.mean()             # (F, K, D)
+        scale_tril = self.cholesky()  # (F, K, D, D)
+
+        samples = []
+        for f in range(self.num_folds):
+            mvn = torch.distributions.MultivariateNormal(
+                loc=mean[f],
+                scale_tril=scale_tril[f]
+            )
+            s = mvn.sample((num_samples,))  # (N, K, D)
+            samples.append(s.permute(1, 2, 0))  # (K, D, N)
+
+        return torch.stack(samples, dim=0)  # (F, K, D, N)

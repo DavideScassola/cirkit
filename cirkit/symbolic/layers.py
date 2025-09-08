@@ -4,7 +4,7 @@ from enum import IntEnum, auto
 from typing import Any, cast
 from typing_extensions import Self  # TODO: import from typing in Python 3.11+
 
-from cirkit.symbolic.initializers import NormalInitializer
+from cirkit.symbolic.initializers import NormalInitializer, CholeskyInitializer
 from cirkit.symbolic.parameters import (
     Parameter,
     ParameterFactory,
@@ -12,6 +12,7 @@ from cirkit.symbolic.parameters import (
     SigmoidParameter,
     SoftmaxParameter,
     TensorParameter,
+    LowerTriangularTransform
 )
 from cirkit.utils.scope import Scope
 
@@ -856,3 +857,76 @@ class SumLayer(Layer):
     @property
     def params(self) -> Mapping[str, Parameter]:
         return {"weight": self.weight}
+
+
+class MultivariateGaussianLayer(InputLayer):
+    """A symbolic multivariate Gaussian layer with full covariance via Cholesky factor.
+    Each output unit represents a multivariate Gaussian over the given scope.
+    """
+
+    def __init__(
+        self,
+        scope: Scope,
+        num_output_units: int,
+        *,
+        mean: Parameter | None = None,
+        cholesky: Parameter | None = None,
+        log_partition: Parameter | None = None,
+        mean_factory: ParameterFactory | None = None,
+        cholesky_factory: ParameterFactory | None = None,
+    ) -> None:
+        if len(scope) < 2:
+            raise ValueError("Multivariate Gaussian requires at least 2 variables")
+
+        super().__init__(scope, num_output_units)
+        self._dim = len(scope)
+        self._mean_shape = (self.num_output_units, self._dim)
+        self._cholesky_shape = (self.num_output_units, self._dim,self._dim)
+        self._log_partition_shape = (self.num_output_units,)
+
+        # --- Mean ---
+        if mean is None:
+            if mean_factory is None:
+                mean = Parameter.from_input(
+                    TensorParameter(*self._mean_shape, initializer=NormalInitializer())
+                )
+            else:
+                mean = mean_factory(self._mean_shape)
+
+        if mean.shape != self._mean_shape:
+            raise ValueError(f"Expected mean shape {self._mean_shape}, but got {mean.shape}")
+
+        # --- Cholesky Factor (Lower-Triangular Matrix) ---
+        if cholesky is None:
+            if cholesky_factory is None:
+                cholesky = Parameter.from_unary(
+                    LowerTriangularTransform(self._cholesky_shape),
+                    TensorParameter(*self._cholesky_shape, initializer=CholeskyInitializer())
+                )
+            else:
+                cholesky = cholesky_factory(self._cholesky_shape)
+
+        if cholesky.shape != self._cholesky_shape:
+            raise ValueError(f"Expected cholesky shape {self._cholesky_shape}, but got {cholesky.shape}")
+
+        # --- Log Partition ---
+        if log_partition is not None and log_partition.shape != self._log_partition_shape:
+            raise ValueError(f"Expected log_partition shape {self._log_partition_shape}, but got {log_partition.shape}")
+
+        self.mean = mean
+        self.cholesky = cholesky
+        self.log_partition = log_partition
+
+    @property
+    def config(self) -> Mapping[str, Any]:
+        return {
+            "scope": self.scope,
+            "num_output_units": self.num_output_units,
+        }
+
+    @property
+    def params(self) -> Mapping[str, Parameter]:
+        p = {"mean": self.mean, "cholesky": self.cholesky}
+        if self.log_partition is not None:
+            p["log_partition"] = self.log_partition
+        return p

@@ -34,6 +34,7 @@ from cirkit.backend.torch.parameters.nodes import (
     TorchSquareParameter,
     TorchSumParameter,
     TorchTensorParameter,
+    TorchLowerTriangularTransform
 )
 from cirkit.symbolic.dtypes import DataType
 from cirkit.symbolic.parameters import (
@@ -64,6 +65,7 @@ from cirkit.symbolic.parameters import (
     SquareParameter,
     SumParameter,
     TensorParameter,
+    LowerTriangularTransform
 )
 
 if TYPE_CHECKING:
@@ -266,6 +268,11 @@ def compile_polynomial_differential(
 ) -> TorchPolynomialDifferential:
     return TorchPolynomialDifferential(*p.in_shapes, order=p.order)
 
+def compile_lower_triangular_transform(
+    compiler: "TorchCompiler", p: LowerTriangularTransform
+) -> TorchLowerTriangularTransform:
+    return TorchLowerTriangularTransform(*p.in_shapes)
+
 
 DEFAULT_PARAMETER_COMPILATION_RULES: dict[
     ParameterCompilationSign, Callable[..., TorchParameterNode]
@@ -297,4 +304,5 @@ DEFAULT_PARAMETER_COMPILATION_RULES: dict[
     GaussianProductLogPartition: compile_gaussian_product_log_partition,
     PolynomialProduct: compile_polynomial_product,
     PolynomialDifferential: compile_polynomial_differential,
+    LowerTriangularTransform: compile_lower_triangular_transform
 }

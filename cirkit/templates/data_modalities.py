@@ -310,3 +310,103 @@ def tabular_data(
         num_sum_units=num_sum_units,
         num_classes=num_classes,
     )
+
+
+def vector_data(
+    dim: int,
+    region_graph: str = "quad-graph",
+    *,
+    input_layer: str,
+    num_input_units: int,
+    sum_product_layer: str,
+    num_sum_units: int,
+    num_classes: int = 1,
+    input_params: dict[str, Parameterization] | None = None,
+    sum_weight_param: Parameterization | None = None,
+    use_mixing_weights: bool = True,
+) -> Circuit:
+    """
+    Builds a deep symbolic circuit for vector input data (e.g., points sampled from distributions).
+    
+    Args:
+        dim: Number of input dimensions (flat vector).
+        region_graph: One of: 'random-binary-tree'.
+        input_layer: e.g., 'gaussian', 'multivariate_gaussian', 'categorical'.
+        num_input_units: Number of input units per leaf region.
+        sum_product_layer: One of: 'cp', 'cpt', 'tucker'.
+        num_sum_units: Number of sum units in each sum layer.
+        num_classes: Output classes (default: 1).
+        input_params: Optional parameterizations for input layer.
+        sum_weight_param: Optional parameterization for sum weights.
+        use_mixing_weights: Whether to use mixing layers (default: True).
+    
+    Returns:
+        A Circuit instance modeling the structured vector input.
+    """
+
+    if region_graph not in [
+        "quad-tree-2",
+        "quad-tree-4",
+        "quad-graph",
+        "random-binary-tree",
+        "poon-domingos",
+    ]:
+        raise ValueError(f"Unknown region graph called {region_graph}")
+
+    if input_layer not in ["gaussian", "multivariate_gaussian", "categorical"]:
+        raise ValueError(f"Unsupported input layer: {input_layer}")
+
+    # Build a region graph over vector indices
+    rg = RandomBinaryTree(dim, min_leaf_size=2)
+
+    # Setup input layer factory
+    input_kwargs: dict[str, Any]
+    match input_layer:
+        case "gaussian":
+            input_kwargs = {}
+        case "multivariate_gaussian":
+            input_kwargs = {}
+        case "categorical":
+            input_kwargs = {"num_categories": 256}
+        case _:
+            raise ValueError(f"Unknown input layer: {input_layer}")
+
+    if input_params is not None:
+        input_kwargs.update(
+            (name + "_factory", parameterization_to_factory(param))
+            for name, param in input_params.items()
+        )
+
+    input_factory = name_to_input_layer_factory(input_layer, **input_kwargs)
+
+    # Sum weight parameterization
+    if sum_weight_param is None:
+        sum_weight_param = Parameterization(activation="softmax", initialization="normal")
+
+    sum_weight_factory = parameterization_to_factory(sum_weight_param)
+
+    # Mixing layer factory (for arity > 1 sum nodes)
+    if use_mixing_weights:
+        nary_sum_weight_factory = lambda arity: mixing_weight_factory(
+            arity=arity, param_factory=sum_weight_factory
+        )
+    else:
+        nary_sum_weight_factory = sum_weight_factory
+
+    # Whether to factorize multivariate inputs
+    factorize_multivariate = input_layer != "multivariate_gaussian"
+    
+    #from cirkit.templates.region_graph.io import plot_region_graph
+    #plot_region_graph(rg, out_path=f"region_graph_{dim}.png")
+
+    # Build and return the symbolic circuit
+    return rg.build_circuit(
+        input_factory=input_factory,
+        sum_product=sum_product_layer,
+        sum_weight_factory=sum_weight_factory,
+        nary_sum_weight_factory=nary_sum_weight_factory,
+        num_input_units=num_input_units,
+        num_sum_units=num_sum_units,
+        num_classes=num_classes,
+        factorize_multivariate=factorize_multivariate,
+    )

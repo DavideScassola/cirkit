@@ -1042,3 +1042,35 @@ def mixing_weight_factory(shape: tuple[int, ...], *, param_factory: ParameterFac
     return Parameter.from_unary(
         MixingWeightParameter(mixing_weights_shape), param_factory(mixing_weights_shape)
     )
+
+
+class LowerTriangularTransform(ParameterOp):
+    """Transforms a raw tensor into lower-triangular matrices for Cholesky-based covariance."""
+
+    def __init__(self, shape: tuple[int, int, int, int]):
+        """
+        Args:
+            shape: The output shape (F, K, D) where the resulting matrices will be (F, K, D, D).
+                   Typically: F = number of folds, K = number of components, D = dimension.
+        """
+        self._shape = shape
+        K, D, D = shape
+        self._input_dim = D
+        self._in_shapes = ((K, self._input_dim,self._input_dim),)
+
+    @property
+    def in_shapes(self) -> tuple[tuple[int, ...], ...]:
+        return self._in_shapes
+
+    @property
+    def shape(self) -> tuple[int, int, int, int]:
+        """The output shape: a batch of lower-triangular matrices."""
+        K, D, D = self._shape
+        return (K, D, D)
+
+    @property
+    def config(self) -> dict[str, object]:
+        return {"shape": self._shape}
+
+    def __repr__(self) -> str:
+        return f"LowerTriangularTransform(shape={self._shape})"

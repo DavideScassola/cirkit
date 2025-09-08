@@ -161,3 +161,13 @@ class DirichletInitializer(Initializer):
             return True
         assert isinstance(self.alpha, list)
         return shape[axis] == len(self.alpha)
+
+
+class CholeskyInitializer(ElementwiseInitializer):
+    def __init__(self, mean: float = 0.0, stddev: float = 1.0) -> None:
+        self.mean = mean
+        self.stddev = stddev
+
+    @property
+    def config(self) -> dict:
+        return {"mean": self.mean, "stddev": self.stddev}
