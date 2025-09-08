@@ -145,6 +145,23 @@ def _categorical_mutual_info(
 
 
 def _heterogeneous_mutual_info(
+    data: Tensor, is_categorical_mask: list[bool], bins: int = 10
+) -> Tensor:
+
+    is_categorical = torch.tensor(is_categorical_mask, dtype=torch.bool, device=data.device)
+    continuous_subset = torch.where(~is_categorical)[0]
+    
+    x = data[:,continuous_subset].clone()
+    x = (x - x.min(dim=0, keepdim=True).values)*bins / x.max(dim=0, keepdim=True).values
+    x = x.round()
+        
+    discretized_data = data.clone()
+    discretized_data[:,continuous_subset] = x
+
+    return _categorical_mutual_info(discretized_data.long()).float()
+
+
+def _heterogeneous_mutual_info_old(
     data: Tensor, is_categorical_mask: list[bool], normalize: bool = True
 ) -> Tensor:
     """Computes the mutual information (MI) matrix for heterogeneous data
