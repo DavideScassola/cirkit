@@ -86,6 +86,10 @@ class RegionGraph(DiAcyclicGraph[RegionGraphNode]):
     ) -> None:
         super().__init__(nodes, in_nodes, outputs)
         self._check_structure()
+        
+        # TODO: only for debugging
+        from cirkit.templates.region_graph.io import plot_region_graph
+        plot_region_graph(self, out_path=f"region_graph.png")
 
     def _check_structure(self) -> None:
         for node, node_children in self.nodes_inputs.items():
@@ -392,6 +396,7 @@ class RegionGraph(DiAcyclicGraph[RegionGraphNode]):
             ValueError: If 'sum_product' is specified, but 'weight_factory' is not.
             ValueError: The given region graph is malformed.
         """
+        
         if (sum_factory is None and prod_factory is not None) or (
             sum_factory is not None and prod_factory is None
         ):
