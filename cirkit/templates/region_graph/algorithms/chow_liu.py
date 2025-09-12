@@ -162,7 +162,7 @@ def _heterogeneous_mutual_info_bin(
 
 
 def _heterogeneous_mutual_info(
-    data: Tensor, is_categorical_mask: list[bool], normalize: bool = True
+    data: Tensor, is_categorical_mask: list[bool], normalize: bool = False
 ) -> Tensor:
     """Computes the mutual information (MI) matrix for heterogeneous data
     (both discrete/categorical data and continuous).
