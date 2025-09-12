@@ -144,7 +144,7 @@ def _categorical_mutual_info(
     return (joints * (joints.log() - outers.log())).sum(dim=(2, 3)).fill_diagonal_(0)
 
 
-def _heterogeneous_mutual_info(
+def _heterogeneous_mutual_info_bin(
     data: Tensor, is_categorical_mask: list[bool], bins: int = 10
 ) -> Tensor:
 
@@ -161,7 +161,7 @@ def _heterogeneous_mutual_info(
     return _categorical_mutual_info(discretized_data.long()).float()
 
 
-def _heterogeneous_mutual_info_old(
+def _heterogeneous_mutual_info(
     data: Tensor, is_categorical_mask: list[bool], normalize: bool = True
 ) -> Tensor:
     """Computes the mutual information (MI) matrix for heterogeneous data
