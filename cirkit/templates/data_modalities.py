@@ -182,6 +182,7 @@ def tabular_data(
     num_classes: int = 1,
     sum_weight_param: Parameterization | None = None,
     use_mixing_weights: bool = True,
+    bin_for_mi: int | None = None,
 ) -> Circuit:
     """
     Constructs a symbolic circuit whose structure is tailored for tabular data sets,
@@ -268,6 +269,7 @@ def tabular_data(
                     else None
                 ),
                 as_region_graph=True,
+                bin_for_mi=bin_for_mi,
             )
             if not isinstance(rg_result, RegionGraph):
                 raise ValueError(f"Expected a RegionGraph, but got {type(rg_result).__name__}.")

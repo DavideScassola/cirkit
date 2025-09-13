@@ -16,6 +16,7 @@ def ChowLiuTree(
     num_categories: int | None = None,
     num_bins: int | None = None,
     as_region_graph: bool = True,
+    bin_for_mi: int | None = None,
 ) -> np.ndarray | RegionGraph:
     """Learns a Chow-Liu Tree and returns it either as a
     list of predecessors (Bayesian net) or as region graph (HCLT).
@@ -47,8 +48,11 @@ def ChowLiuTree(
     assert data.ndim == 2
     assert root is None or -1 < root < data.size(-1)
     if isinstance(input_type, list):
+        is_categorical_mask = [name == "categorical" for name in input_type]
         mutual_info = _heterogeneous_mutual_info(
-            data, is_categorical_mask=[name == "categorical" for name in input_type]
+            data, is_categorical_mask=is_categorical_mask
+        ) if bin_for_mi is None else _heterogeneous_mutual_info_bin(
+            data, is_categorical_mask=is_categorical_mask, bins=bin_for_mi
         )
     elif input_type == "categorical":
         if num_bins is not None:
