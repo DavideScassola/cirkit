@@ -260,16 +260,49 @@ class SamplingQuery(Query):
         return samples
 
     def _pad_samples(self, samples: Tensor, scope_idx: Tensor) -> Tensor:
-        """Pads univariate samples to the size of the scope of the circuit (output dimension)
+        """Pads samples to the size of the scope of the circuit (output dimension)
         according to scope for compatibility in downstream inner nodes.
+        
+        Args:
+            samples: For univariate layers, shape (F, K, N).
+                     For multivariate layers, shape (F, K, D, N).
+            scope_idx: Shape (F, D) where D is the number of variables.
+        
+        Returns:
+            Padded samples of shape (F, K, N, D_total) where D_total is the total
+            number of variables in the circuit scope.
         """
-        if scope_idx.shape[1] != 1:
-            raise NotImplementedError("Padding is only implemented for univariate samples")
-
-        # padded_samples: (F, K, num_samples, D)
-        padded_samples = torch.zeros(
-            (*samples.shape, len(self._circuit.scope)), device=samples.device, dtype=samples.dtype
-        )
-        fold_idx = torch.arange(samples.shape[0], device=samples.device)
-        padded_samples[fold_idx, :, :, scope_idx.squeeze(dim=1)] = samples
+        num_variables = scope_idx.shape[1]
+        D_total = len(self._circuit.scope)
+        
+        # Univariate case: samples shape is (F, K, N)
+        if num_variables == 1:
+            # padded_samples: (F, K, N, D_total)
+            padded_samples = torch.zeros(
+                (*samples.shape, D_total), device=samples.device, dtype=samples.dtype
+            )
+            fold_idx = torch.arange(samples.shape[0], device=samples.device)
+            padded_samples[fold_idx, :, :, scope_idx.squeeze(dim=1)] = samples
+            return padded_samples
+        
+        # Multivariate case: samples shape is (F, K, D, N)
+        F, K, D, N = samples.shape
+        if D != num_variables:
+            raise ValueError(
+                f"Sample dimension D={D} does not match scope_idx variables={num_variables}"
+            )
+        
+        # padded_samples: (F, K, N, D_total)
+        padded_samples = torch.zeros((F, K, N, D_total), device=samples.device, dtype=samples.dtype)
+        
+        # Permute samples from (F, K, D, N) to (F, K, N, D)
+        samples = samples.permute(0, 1, 3, 2)  # (F, K, N, D)
+        
+        # Fill in the padded tensor at the appropriate variable indices
+        # For each fold, we need to scatter the D variables to their correct positions
+        for f in range(F):
+            # scope_idx[f] contains the variable indices for this fold
+            # We want padded_samples[f, :, :, scope_idx[f]] = samples[f, :, :, :]
+            padded_samples[f, :, :, scope_idx[f]] = samples[f, :, :, :]
+        
         return padded_samples

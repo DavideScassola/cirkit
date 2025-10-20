@@ -48,25 +48,27 @@ def compile_dirichlet_initializer(
     axis = init.axis if init.axis < 0 else init.axis + 1
     return functools.partial(dirichlet_, alpha=init.alpha, dim=axis)
 
+
+def _init_cholesky(tensor: torch.Tensor, mean: float, stddev: float) -> torch.Tensor:
+    """
+    Initializes the tensor with random values and applies softplus to the diagonal
+    after zeroing the upper triangle.
+    Assumes tensor shape is (..., D, D).
+    """
+    with torch.no_grad():
+        nn.init.normal_(tensor, mean=mean, std=stddev)
+        tensor.tril_()  # Zero upper triangle
+        diag_idx = torch.arange(tensor.size(-1), device=tensor.device)
+        tensor[..., diag_idx, diag_idx] = torch.nn.functional.softplus(
+            tensor[..., diag_idx, diag_idx]
+        )
+    return tensor
+
+
 def compile_cholesky_initializer(
     compiler: "TorchCompiler", init: CholeskyInitializer
 ) -> InitializerFunc:
-    def _init_cholesky(tensor: torch.Tensor) -> torch.Tensor:
-        """
-        Initializes the tensor with random values and applies softplus to the diagonal
-        after zeroing the upper triangle.
-        Assumes tensor shape is (..., D, D).
-        """
-        with torch.no_grad():
-            nn.init.normal_(tensor, mean=init.mean, std=init.stddev)
-            tensor.tril_() # Zero upper triangle
-            diag_idx = torch.arange(tensor.size(-1), device=tensor.device)
-            tensor[..., diag_idx, diag_idx] = torch.nn.functional.softplus(
-                tensor[..., diag_idx, diag_idx]
-            )
-        return tensor
-
-    return _init_cholesky
+    return functools.partial(_init_cholesky, mean=init.mean, stddev=init.stddev)
 
 
 DEFAULT_INITIALIZER_COMPILATION_RULES: dict[
