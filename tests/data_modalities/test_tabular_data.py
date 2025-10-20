@@ -10,10 +10,10 @@ from cirkit.templates.data_modalities import tabular_data
 
 
 @pytest.mark.parametrize(
-    "n_cat_features,n_num_features,region_graph",
-    itertools.product([0, 1, 2], [0, 1, 3], ["random-binary-tree", "chow-liu-tree"]),
+    "n_cat_features,n_num_features,region_graph,add_multivariates",
+    itertools.product([0, 1, 2], [0, 1, 3], ["chow-liu-tree"], [True, False]),
 )
-def test_tabular_data_modality(n_cat_features: int, n_num_features: int, region_graph: str):
+def test_tabular_data_modality(n_cat_features: int, n_num_features: int, region_graph: str, add_multivariates: bool):
 
     n = 20
     n_classes = 5
@@ -45,23 +45,24 @@ def test_tabular_data_modality(n_cat_features: int, n_num_features: int, region_
                 sum_weight_param=utils.Parameterization(
                     activation="softmax", initialization="normal"
                 ),
-                use_mixing_weights=True,
+                add_multivariates=add_multivariates,
             )
 
             # Check if the circuit has the expected number of input layers
             assert len(symbolic_circuit.scope) == num_features
 
             # Check if the input layers are correctly created
-            for circuit_input_layer in symbolic_circuit.input_layers:
-                scope = list(circuit_input_layer.scope)[0]
-                expected_type = (
-                    CategoricalLayer
-                    if input_layers[scope]["name"] == "categorical"
-                    else GaussianLayer
-                )
-                assert isinstance(
-                    circuit_input_layer, expected_type
-                ), f"Expected {expected_type.__name__}, got {type(circuit_input_layer).__name__}"
+            if not add_multivariates:
+                for circuit_input_layer in symbolic_circuit.input_layers:
+                    scope = list(circuit_input_layer.scope)[0]
+                    expected_type = (
+                        CategoricalLayer
+                        if input_layers[scope]["name"] == "categorical"
+                        else GaussianLayer
+                    )
+                    assert isinstance(
+                        circuit_input_layer, expected_type
+                    ), f"Expected {expected_type.__name__}, got {type(circuit_input_layer).__name__}"
 
             # Check if the log-likelihood has the expected shape
             circuit = compile(symbolic_circuit)

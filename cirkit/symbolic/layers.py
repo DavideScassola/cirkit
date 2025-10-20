@@ -736,8 +736,8 @@ class ProductLayer(Layer, ABC):
         Raises:
             ValueError: If the arity is less than two.
         """
-        if arity < 2:
-            raise ValueError("The arity should be at least 2")
+        if arity < 1:
+            raise ValueError("The arity should be at least 1")
         super().__init__(num_input_units, num_output_units, arity)
 
 

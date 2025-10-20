@@ -14,6 +14,7 @@ from cirkit.templates.region_graph import (
     RandomBinaryTree,
     RegionGraph,
 )
+from cirkit.templates.region_graph.graph import PartitionNode, RegionNode
 from cirkit.templates.utils import (
     InputLayerFactory,
     Parameterization,
@@ -22,6 +23,34 @@ from cirkit.templates.utils import (
 )
 from cirkit.utils.scope import Scope
 
+
+def add_joints_to_region_graph(
+    rg: RegionGraph,
+    joinable_scopes: list,
+) -> RegionGraph:
+    
+    if not joinable_scopes:
+        return rg
+        
+    nodes = list(rg._nodes)
+    in_nodes = rg._in_nodes
+    
+    n = len(nodes)
+    for i in range(n):
+        rgn = nodes[i]
+        joinable_subscope = [i for i in rgn.scope if i in joinable_scopes]
+        if isinstance(rgn, RegionNode) and len(joinable_subscope) > 1:
+            new_partition_node = PartitionNode(rgn.scope)
+            joint_region_node = RegionNode(Scope(joinable_subscope))
+            other_region_nodes = [RegionNode(Scope([i])) for i in rgn.scope if i not in joinable_scopes]
+            
+            nodes.append(new_partition_node)
+            nodes.append(joint_region_node)
+            nodes.extend(other_region_nodes)
+            in_nodes[rgn].append(new_partition_node)
+            in_nodes[new_partition_node] = [joint_region_node] + other_region_nodes
+            
+    return RegionGraph(nodes, in_nodes, outputs=rg._outputs)
 
 def image_data(
     image_shape: tuple[int, int, int],
@@ -181,7 +210,7 @@ def tabular_data(
     num_sum_units: int,
     num_classes: int = 1,
     sum_weight_param: Parameterization | None = None,
-    use_mixing_weights: bool = True,
+    add_multivariates: bool = False,
 ) -> Circuit:
     """
     Constructs a symbolic circuit whose structure is tailored for tabular data sets,
@@ -274,18 +303,17 @@ def tabular_data(
             rg = rg_result
         case _:
             raise ValueError(f"Unknown region graph called {region_graph}")
+        
+    if add_multivariates:
+        joinable_scopes = [i for i in range(len(input_layers)) if input_layers[i]['name']=='gaussian']
+        rg = add_joints_to_region_graph(rg, joinable_scopes=joinable_scopes)
 
     if sum_weight_param is None:
         sum_weight_param = Parameterization(activation="softmax", initialization="normal")
     sum_weight_factory = parameterization_to_factory(sum_weight_param)
 
     nary_sum_weight_factory: ParameterFactory
-    if use_mixing_weights:
-        nary_sum_weight_factory = functools.partial(
-            mixing_weight_factory, param_factory=sum_weight_factory
-        )
-    else:
-        nary_sum_weight_factory = sum_weight_factory
+    nary_sum_weight_factory = sum_weight_factory
 
     input_factories: InputLayerFactory | Mapping[Scope, InputLayerFactory]
     if isinstance(input_layers, dict):
@@ -300,6 +328,18 @@ def tabular_data(
             Scope([i]): name_to_input_layer_factory(input_layer["name"], **input_layer["args"])
             for i, input_layer in enumerate(input_layers)
         }
+        
+        def scope_to_factory(scope: Scope) -> InputLayerFactory:
+            first_variable = list(scope)[0]
+            if len(scope) == 1:
+                return name_to_input_layer_factory(input_layers[first_variable]["name"], **input_layers[first_variable]["args"])
+            else:
+                if input_layers[first_variable]['name'] != 'gaussian':
+                    raise ValueError("Only 'gaussian' input layers can be used for multivariate joints.")
+                return name_to_input_layer_factory("multivariate_gaussian", **{})     
+        
+        leaf_nodes_scopes = [rgn.scope for rgn in rg._nodes if isinstance(rgn, RegionNode) and not rg.region_inputs(rgn)]
+        input_factories = {scope: scope_to_factory(scope) for scope in leaf_nodes_scopes}
 
     return rg.build_circuit(
         input_factory=input_factories,
@@ -309,6 +349,7 @@ def tabular_data(
         num_input_units=num_input_units,
         num_sum_units=num_sum_units,
         num_classes=num_classes,
+        factorize_multivariate=not add_multivariates,
     )
 
 

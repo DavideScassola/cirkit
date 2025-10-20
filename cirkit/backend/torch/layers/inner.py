@@ -110,8 +110,8 @@ class TorchHadamardLayer(TorchInnerLayer):
             ValueError: If the arity is not at least 2.
             ValueError: If the number of input units is not the same as the number of output units.
         """
-        if arity < 2:
-            raise ValueError("The arity should be at least 2")
+        if arity < 1:
+            raise ValueError("The arity should be at least 1")
         super().__init__(
             num_input_units, num_input_units, arity=arity, semiring=semiring, num_folds=num_folds
         )
