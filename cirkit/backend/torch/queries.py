@@ -412,12 +412,13 @@ class SamplingQuery(Query):
             x = x.to(self._circuit.device)
             state = x.clone()
 
-            if state.size(0) != 1:
-                raise ValueError("Only one tensor can be provided as evidence.")
+            if state.size(0) != 1 and num_samples > 1:
+                raise ValueError("Either batched evidence or multiple samples for a single evidence is supported, but not both.")
+            if state.size(0) == 1:
+                state = state.tile((num_samples, 1))
+                evidence_vars = evidence_vars.tile((num_samples, 1))
 
-            state = state.tile((num_samples, 1))
-            evidence_vars = evidence_vars.tile((num_samples, 1))
-
+        num_samples = state.size(0) # TODO: num_samples can be inferred from state, that has to be provided. If inconsistent It can lead to problematic behaviors.
         samples_p, state = self._circuit.backtrack(
             x=state,
             module_fn=functools.partial(

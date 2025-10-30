@@ -378,9 +378,8 @@ class TorchSumLayer(TorchInnerLayer):
         # apply the weight of the sum unit to each input
         # without reducing as a sum
         weighted_x = torch.einsum("fbi,foi->foi", sp_x, weight)
-
-        # make sure the probs provided are not all zeros
-        dist = torch.distributions.Categorical(probs=weighted_x + torch.finfo(weighted_x.dtype).eps)
+        
+        dist = torch.distributions.Categorical(logits=((weighted_x + torch.finfo(weighted_x.dtype).eps).log()))
         idxs = dist.sample((sp_x.size(1),)).permute(1, 0, 2) # (B, F, K_i) -> (F, B, K_i)
                 
         # compute the regular layer output by reducing along the last dimension
