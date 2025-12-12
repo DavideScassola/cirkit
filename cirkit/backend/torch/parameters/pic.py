@@ -143,6 +143,8 @@ class PICInputNet(nn.Module):
             with torch.no_grad():
                 _ = self()  # initialize tensor_parameter as result of self.forward()
 
+        self.device = next(self.parameters()).device
+
     def forward(self, z_quad: torch.Tensor | None = None, n_chunks: int | None = 1):
         z_quad = self.z_quad if z_quad is None else z_quad
         assert z_quad.ndim == 1

@@ -152,6 +152,7 @@ class IntegrateQuery(Query):
         if not torch.any(integration_mask).item():
             return output
         integration_output = layer.integrate()
+        integration_output = integration_output.to(output.device)
         # Use the integration mask to select which output should be the result of
         # an integration operation, and which should not be
         # This is done in parallel for all folds, and regardless of whether the
@@ -453,7 +454,9 @@ class SamplingQuery(Query):
                 idx = torch.where(is_evidence, x, sample_idx)
                 # when evidence is used, select that layer otherwise marginalize
                 # the variable
-                output = torch.where(is_evidence, layer(x), layer.integrate())
+                integration_output = layer.integrate()
+                integration_output = integration_output.to(x.device)
+                output = torch.where(is_evidence, layer(x), integration_output)
             else:
                 # layer has been marginalized
                 output = layer(x)
