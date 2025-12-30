@@ -40,7 +40,8 @@ class LayerAddressBook(AddressBook[TorchLayer]):
     def backtrack(self, state, module_idxs: list[Tensor]) -> Tensor:
         # entry queue holds a tuple of the form:
         # (module address book id, idxs of module, previous module address book id)
-        entry_queue = deque([(len(self._entries) - 1, None, None, None)])
+        # entry_queue = deque([(len(self._entries) - 1, None, None, None)])
+        entry_queue = deque([(len(self) - 1, None, None, None)])
         while entry_queue:
             entry_id, p_fold_idx, p_batch_idx, p_unit_idx = entry_queue.popleft()
 

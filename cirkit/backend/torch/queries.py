@@ -278,8 +278,11 @@ class MAPQuery(Query):
                 else:
                     raise ValueError("The circuit does not have variables.")
 
-            state = torch.full(
-                (batch_size, num_variables), 0, dtype=torch.long, device=self._circuit.device
+            # state = torch.full(
+            #     (batch_size, num_variables), 0, dtype=torch.long, device=self._circuit.device
+            # )
+            state = torch.zeros(
+                (batch_size, num_variables), dtype=torch.long, device=self._circuit.device
             )
             evidence_vars = state.clone().to(torch.bool)
         else:

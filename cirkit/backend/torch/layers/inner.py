@@ -359,8 +359,9 @@ class TorchSumLayer(TorchInnerLayer):
         normalized = torch.allclose(torch.sum(weight, dim=-1), torch.ones(1, device=weight.device))
         if not normalized:
             # normalize weight as a probability distribution
-            eps = torch.finfo(weight.dtype).eps
-            weight = (weight + eps) / (weight + eps).sum(dim=-1, keepdim=True)
+            # eps = torch.finfo(weight.dtype).eps
+            # weight = (weight + eps) / (weight + eps).sum(dim=-1, keepdim=True)
+            raise TypeError("Sampling in sum layers only works with normalized weights.")
         
         # intermediary weighted results are computed in the sum product semiring
         # since very small products leading to underflow would not be selected

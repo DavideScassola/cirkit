@@ -486,7 +486,8 @@ class TorchCategoricalLayer(TorchExpFamilyLayer):
         # use the batch dimension as the dimension on which sampling is performed
         # (N, F, 1, K) -> (F, N, K)
         idxs = dist.sample((num_samples,)).squeeze(-2).permute(1, 0, 2)
-        val = self.semiring.map_from(dist.log_prob(idxs), LSESumSemiring)
+        # val = self.semiring.map_from(dist.log_prob(idxs), LSESumSemiring)
+        val = dist.log_prob(idxs)
         return idxs, val
 
     def max(self, x=None) -> tuple[Tensor, Tensor]:
@@ -760,9 +761,10 @@ class TorchGaussianLayer(TorchExpFamilyLayer):
 
         # use the batch dimension as the dimension on which sampling is performed
         # (N, F, 1, K) -> (F, N, K)
-        val = self.semiring.map_from(
-            dist.sample((num_samples,)).squeeze(-2).permute(1, 0, 2), LSESumSemiring
-        )
+        # val = self.semiring.map_from(
+        #     dist.sample((num_samples,)).squeeze(-2).permute(1, 0, 2), LSESumSemiring
+        # )
+        val = dist.sample((num_samples,)).squeeze(-2).permute(1, 0, 2)
         return val, val
 
 
