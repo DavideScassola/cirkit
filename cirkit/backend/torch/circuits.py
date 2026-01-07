@@ -399,14 +399,16 @@ class TorchCircuit(TorchDiAcyclicGraph[TorchLayer]):
         self,
         x: Tensor | None = None,
         gate_function_kwargs: Mapping[str, Mapping[str, Any]] | None = None,
+        return_all: bool = False,
     ) -> Tensor:
         # IGNORE: Idiom for nn.Module.__call__.
-        return super().__call__(x, gate_function_kwargs=gate_function_kwargs)  # type: ignore[no-any-return,misc]
+        return super().__call__(x, gate_function_kwargs=gate_function_kwargs, return_all=return_all)  # type: ignore[no-any-return,misc]
 
     def forward(
         self,
         x: Tensor | None = None,
         gate_function_kwargs: Mapping[str, Mapping[str, Any]] | None = None,
+        return_all: bool = False,
     ) -> Tensor:
         """Evaluate the circuit layers in forward mode, i.e., by evaluating each layer by
         following the topological ordering.
@@ -415,6 +417,10 @@ class TorchCircuit(TorchDiAcyclicGraph[TorchLayer]):
             x: The tensor input of the circuit, with shape $(B, D)$, where B is the batch size,
                 and $D$ is the number of variables. It can be None if the circuit has empty scope,
                 i.e., it computes a constant tensor. Defaults to None.
+            gate_function_kwargs: A mapping from gate function ids to their keyword arguments
+                used during the evaluation. Defaults to None.
+            return_all: If True, returns a tuple where the first element is the output tensor
+                of the circuit, and the second element is the list of outputs of each layer in the circuit. Defaults to False.
 
         Returns:
             Tensor: The tensor output of the circuit, with shape $(B, O, K)$,
@@ -426,19 +432,21 @@ class TorchCircuit(TorchDiAcyclicGraph[TorchLayer]):
         """
         if self._scope and x is None:
             raise ValueError(f"Expected some input 'x', as the circuit has scope '{self._scope}'")
-        return self._evaluate_layers(x, gate_function_kwargs=gate_function_kwargs)
+        return self._evaluate_layers(x, gate_function_kwargs=gate_function_kwargs, return_all=return_all)
 
     def _evaluate_layers(
-        self, x: Tensor | None, gate_function_kwargs: Mapping[str, Mapping[str, Any]] | None = None
+        self, x: Tensor | None, gate_function_kwargs: Mapping[str, Mapping[str, Any]] | None = None, return_all: bool = False
     ) -> Tensor:
         # Memoize the gate functions.This will be called just before the invocation of the
         # [evaluate][cirkit.backend.torch.graph.modules.TorchDiAcyclicGraph.evaluate] method.
         self._memoize_gate_functions({} if gate_function_kwargs is None else gate_function_kwargs)
 
         # Evaluate layers on the given input
-        y = self.evaluate(x)  # (O, B, K)
+        y, all_outputs = self.evaluate(x, return_all=return_all)  # (O, B, K)
         y = y.transpose(0, 1)  # (B, O, K)
         # If the circuit has empty scope, we squeeze the batch dimension, as it is 1
         if not self._scope:
             y = y.squeeze(dim=0)  # (O, K)
+        if return_all:
+            return y, all_outputs
         return y

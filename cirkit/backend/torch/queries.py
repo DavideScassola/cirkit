@@ -58,6 +58,7 @@ class IntegrateQuery(Query):
         *,
         integrate_vars: Tensor | Scope | Sequence[Scope],
         gate_function_kwargs: Mapping[str, Mapping[str, Any]] | None = None,
+        return_all: bool = False,
     ) -> Tensor:
         """Solve an integration query, given an input batch and the variables to integrate.
 
@@ -75,10 +76,14 @@ class IntegrateQuery(Query):
                         of the batch
                     3. Sequence of Scopes, where the length of the list must be either 1 or B. If
                         the list has length 1, behaves as above.
+            gate_function_kwargs: The arguments to pass to each gate function if the circuit is
+                conditionally parameterized.
+            return_all: Whether to return all intermediate layer outputs along with the final output.
         Returns:
             The result of the integration query, given as a tensor of shape $(B, O, K)$,
                 where $B$ is the batch size, $O$ is the number of output vectors of the circuit, and
-                $K$ is the number of units in each output vector.
+                $K$ is the number of units in each output vector. If `return_all` is True, also returns
+                all intermediate layer outputs.
         """
         if isinstance(integrate_vars, Tensor):
             # Check type of tensor is boolean
@@ -121,8 +126,14 @@ class IntegrateQuery(Query):
             module_fn=functools.partial(
                 IntegrateQuery._layer_fn, integrate_vars_mask=integrate_vars_mask
             ),
+            return_all=return_all,
         )  # (O, B, K)
-        return output.transpose(0, 1)  # (B, O, K)
+        if return_all:
+            y, all_outputs = output
+            y = y.transpose(0, 1)  # (B, O, K)
+            return y, all_outputs
+        else:
+            return output.transpose(0, 1)  # (B, O, K)
 
     @staticmethod
     def _layer_fn(layer: TorchLayer, x: Tensor, *, integrate_vars_mask: Tensor) -> Tensor:

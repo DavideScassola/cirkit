@@ -311,7 +311,7 @@ class TorchDiAcyclicGraph(nn.Module, DiAcyclicGraph[TorchModuleT], ABC):
         return self.__class__(nodes, in_nodes, outputs=roots)
 
     def evaluate(
-        self, x: Tensor | None = None, module_fn: ModuleEvalFunction | None = None
+        self, x: Tensor | None = None, module_fn: ModuleEvalFunction | None = None, return_all: bool = False
     ) -> Tensor:
         """Evaluate the Torch graph by following the topological ordering,
             and by using the address book information to retrieve the inputs to each module.
@@ -321,6 +321,9 @@ class TorchDiAcyclicGraph(nn.Module, DiAcyclicGraph[TorchModuleT], ABC):
             module_fn: A functional over modules that overrides the forward method defined by a
                 module. It can be None. If it is None, then the ```__call__``` method defined by
                 the module itself is used.
+            return_all: If True, returns a tuple where the first element is the output tensor
+                of the computational graph, and the second element is the list of outputs
+                of each module in the computational graph. Defaults to False.
 
         Returns:
             The output tensor of the Torch graph.
@@ -336,6 +339,8 @@ class TorchDiAcyclicGraph(nn.Module, DiAcyclicGraph[TorchModuleT], ABC):
         for module, inputs in self._address_book.lookup(module_outputs, in_graph=x):
             if module is None:
                 (output,) = inputs
+                if return_all:
+                    return output, module_outputs
                 return output
             if module_fn is None:
                 y = module(*inputs)
