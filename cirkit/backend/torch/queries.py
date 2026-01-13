@@ -78,12 +78,12 @@ class IntegrateQuery(Query):
                         the list has length 1, behaves as above.
             gate_function_kwargs: The arguments to pass to each gate function if the circuit is
                 conditionally parameterized.
-            return_all: Whether to return all intermediate layer outputs along with the final output.
+            return_all: Whether to return all intermediate layer outputs and sum weights along with the final output.
         Returns:
             The result of the integration query, given as a tensor of shape $(B, O, K)$,
                 where $B$ is the batch size, $O$ is the number of output vectors of the circuit, and
                 $K$ is the number of units in each output vector. If `return_all` is True, also returns
-                all intermediate layer outputs.
+                all intermediate layer outputs and sum weights.
         """
         if isinstance(integrate_vars, Tensor):
             # Check type of tensor is boolean
@@ -121,18 +121,33 @@ class IntegrateQuery(Query):
         # Memoize the gate functions before evaluating the circuit
         self._circuit._memoize_gate_functions(gate_function_kwargs)
 
-        output = self._circuit.evaluate(
-            x,
-            module_fn=functools.partial(
-                IntegrateQuery._layer_fn, integrate_vars_mask=integrate_vars_mask
-            ),
-            return_all=return_all,
-        )  # (O, B, K)
         if return_all:
-            y, all_outputs = output
-            y = y.transpose(0, 1)  # (B, O, K)
-            return y, all_outputs
+            all_weights = []
+
+            def em_forward(layer: TorchLayer, x: Tensor, *, integrate_vars_mask: Tensor) -> torch.Tensor:
+                if isinstance(layer, TorchSumLayer):
+                    # assuming layer is a sum layer
+                    y, w = layer.em_forward(x)
+                    all_weights.append(w)
+                    return y
+                else:
+                    return functools.partial(IntegrateQuery._layer_fn, integrate_vars_mask=integrate_vars_mask)(layer, x)
+
+            output, all_outputs = self._circuit.evaluate(
+                x,
+                module_fn=functools.partial(em_forward, integrate_vars_mask=integrate_vars_mask),
+                return_all=return_all,
+            )  # (O, B, K)
+            output = output.transpose(0, 1)  # (B, O, K)
+            return output, all_outputs, all_weights
         else:
+            output = self._circuit.evaluate(
+                x,
+                module_fn=functools.partial(
+                    IntegrateQuery._layer_fn, integrate_vars_mask=integrate_vars_mask
+                ),
+                return_all=return_all,
+            )  # (O, B, K)
             return output.transpose(0, 1)  # (B, O, K)
 
     @staticmethod

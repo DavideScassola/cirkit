@@ -402,7 +402,8 @@ class TorchCircuit(TorchDiAcyclicGraph[TorchLayer]):
         return_all: bool = False,
     ) -> Tensor:
         # IGNORE: Idiom for nn.Module.__call__.
-        return super().__call__(x, gate_function_kwargs=gate_function_kwargs, return_all=return_all)  # type: ignore[no-any-return,misc]
+        return super().__call__(x, gate_function_kwargs=gate_function_kwargs,
+                                return_all=return_all)  # type: ignore[no-any-return,misc]
 
     def forward(
         self,
@@ -442,7 +443,9 @@ class TorchCircuit(TorchDiAcyclicGraph[TorchLayer]):
         self._memoize_gate_functions({} if gate_function_kwargs is None else gate_function_kwargs)
 
         # Evaluate layers on the given input
-        y, all_outputs = self.evaluate(x, return_all=return_all)  # (O, B, K)
+        y = self.evaluate(x, return_all=return_all)  # (O, B, K)
+        if return_all:
+            y, all_outputs = y  # type: ignore[assignment]
         y = y.transpose(0, 1)  # (B, O, K)
         # If the circuit has empty scope, we squeeze the batch dimension, as it is 1
         if not self._scope:

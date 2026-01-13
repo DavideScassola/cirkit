@@ -333,6 +333,15 @@ class TorchSumLayer(TorchInnerLayer):
         return self.semiring.einsum(
             "fbi,fboi->fbo", inputs=(x,), operands=(weight,), dim=-1, keepdim=True
         )  # shape (F, B, K_o).
+    
+    def em_forward(self, x: Tensor) -> Tensor:
+        # x: (F, H, B, Ki) -> (F, B, H * Ki)
+        x = x.permute(0, 2, 1, 3).flatten(start_dim=2)
+
+        weight = self.weight()
+        return self.semiring.einsum(
+            "fbi,fboi->fbo", inputs=(x,), operands=(weight,), dim=-1, keepdim=True
+        ), weight  # shape (F, B, K_o), weight shape (F, B, K_o, H * Ki).
 
     def sample(self, x: Tensor) -> tuple[Tensor, Tensor]:
         r"""Sample from a sum layer based on the weight paramerters.
